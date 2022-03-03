@@ -2,39 +2,64 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
+#include <sys/ioctl.h>
 
-#define MAX_COMMAND 100
+int i;
+char buff[4096];
+#define DATA "ciao a tutti\n"
+#define SIZE strlen(DATA)
 
-char command[MAX_COMMAND];
+void * the_thread(void* path){
+
+	char* device;
+	int fd;
+
+	device = (char*)path;
+	sleep(1);
+
+	printf("opening device %s\n",device);
+	fd = open(device,O_RDWR);
+	if (fd == -1) {
+		printf("open error on device %s\n", device);
+		return NULL;
+	}
+	
+	printf("device %s successfully opened\n", device);
+	ioctl(fd,1);
+	
+	for (i = 0; i<10/*00*/; i++) write(fd, DATA, SIZE);
+	
+	return NULL;
+}
 
 int main(int argc, char** argv){
 
      int ret;
-     char *path;
      int major;
-     int minor;
+     int minors;
+     char *path;
+     pthread_t tid;
 
-     if (argc < 3) {
-	     printf("usage: path major minor");
+     if (argc < 4) {
+	     printf("usage: pathname major minors\n");
 	     return -1;
      }
 
      path = argv[1];
-     major = strtol(argv[2], NULL, 10);
-     minor = strtol(argv[3], NULL, 10);
+     major = strtol(argv[2],NULL,10);
+     minors = strtol(argv[3],NULL,10);
+     printf("creating %d minors for device %s with major %d\n",minors,path,major);
 
-     printf("creating device file with minor %d for device %s with major %d\n", minor, path, major);
+     for (i = 0; i < minors; i++) {
+	     sprintf(buff,"mknod %s%d c %d %i\n",path,i,major,i);
+	     system(buff);
+	     sprintf(buff,"%s%d",path,i);
+	     pthread_create(&tid,NULL,the_thread,strdup(buff));
+     }
 
-     sprintf(command, "mknod %s c %d %i\n", path, major, minor);
-     system(command);
-
-     printf("trying to open %s\n",argv[1]);
-
-     ret = open(argv[1],O_RDWR);
-     printf("open returned %d\n",ret);
-      
-     ret = write(ret,"ab",2);
-     printf("write returned %d\n",ret);
-	
      pause();
+     return 0;
+
 }
