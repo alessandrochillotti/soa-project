@@ -20,6 +20,7 @@ MODULE_AUTHOR("Alessandro Chillotti");
 #define DEVICE_NAME "multi-flow device"
 
 #define MINOR_NUMBER 128
+#define SESSION_PER_FILE 10
 #define FLOWS 2
 
 #define HIGH_PRIORITY 1
@@ -41,39 +42,47 @@ static int Major;
 #endif
 
 /* struct to abstract IO object */
-typedef struct buffer {
-    char* stream;               // circular buffer
-    int begin;                  // first byte to read
-    int valid_bytes;                 // valid_bytes + begin = point to write
-} buffer_t;
-
 typedef struct object {
-    struct mutex operation_synchronizer;;
-    unsigned char priority;
-    
+    struct mutex operation_synchronizer;
+
     char* stream[FLOWS];        // circular buffer
     int begin[FLOWS];           // first byte to read
     int valid_bytes[FLOWS];     // valid_bytes + begin = point to write
+} object_t;
 
+typedef struct session {
+    int priority;
     bool blocking;
     unsigned long timeout;
-} object_t;
+} session_t;
 
 #define OBJECT_MAX_SIZE (4096)
 
 object_t files[MINOR_NUMBER];
+
+session_t sessions[SESSION_PER_FILE*MINOR_NUMBER];
+int next_session;
 
 /* the actual driver */
 
 static int dev_open(struct inode *inode, struct file *file) {
 
     int minor;
+    object_t *object;
 
     minor = get_minor(file);
+    object = files + minor;
 
     if (minor >= MINOR_NUMBER){
 	    return -ENODEV;
     }
+
+    sessions[next_session].priority = HIGH_PRIORITY;
+    sessions[next_session].blocking = false;
+    sessions[next_session].timeout = 0;
+
+    file->private_data = &sessions[next_session];
+    next_session++;
 
     printk("%s: device file successfully opened for object with minor %d\n", MODNAME, minor);
     
@@ -87,7 +96,10 @@ static int dev_release(struct inode *inode, struct file *file) {
 
     minor = get_minor(file);
 
-    printk("%s: device file with minor %d closed\n", MODNAME, minor);
+    file->private_data = NULL;
+    next_session--;
+
+    printk("%s: device file with minor %d closed\n", MODNAME, minor);    
     
     return 0;
 }
@@ -100,11 +112,15 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
     int ret;
     int seek_buffer;
     object_t *object;
+    session_t *session;
 
     minor = get_minor(filp);
     object = files + minor;
+    session = (session_t *)filp->private_data;
 
     printk("%s: somebody called a write on dev with [major,minor] number [%d,%d]\n",MODNAME,get_major(filp),get_minor(filp));
+
+    printk("next_session = %d", next_session);
 
     mutex_lock(&(object->operation_synchronizer));
 
@@ -113,23 +129,24 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 	    return -ENOSPC; // no space left on device
     }
 
-    if(*off > object->valid_bytes[object->priority]) { // offset beyond the current stream size
+    if(*off > object->valid_bytes[session->priority]) { // offset beyond the current stream size
  	    mutex_unlock(&(object->operation_synchronizer));
 	    return -ENOSR; // out of stream resources
     }
 
     if((OBJECT_MAX_SIZE - *off) < len) {
         mutex_unlock(&(object->operation_synchronizer));
-        if (object->blocking) {
+        if (session->blocking) {
             // TODO: blocking case
             printk("block");
+            return 0;
         } else {
             // len = OBJECT_MAX_SIZE - *off;
             return -ENOSPC;
         }
     }
 
-    if (object->priority == HIGH_PRIORITY) {
+    if (session->priority == HIGH_PRIORITY) {
         printk("HIGH PRIORITY");
 
         seek_buffer = (object->begin[HIGH_PRIORITY] + object->valid_bytes[HIGH_PRIORITY])%OBJECT_MAX_SIZE;
@@ -141,11 +158,10 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
     }
 
     *off += (len - ret);
-    object->valid_bytes[object->priority] = *off;
+    object->valid_bytes[session->priority] = *off;
     mutex_unlock(&(object->operation_synchronizer));
 
-    printk("%ld byte are written", (len-ret));
-
+    printk("%ld byte are written (begin = %d, offset = %d)", (len-ret), object->begin[session->priority], object->valid_bytes[session->priority]);
     return len-ret;
 }
 
@@ -154,36 +170,43 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off) 
     int minor;
     int ret;
     object_t *object;
+    session_t *session;
 
     minor = get_minor(filp);
     object = files + minor;
 
+    session = (session_t *)filp->private_data;
+
     printk("%s: somebody called a read on dev with [major,minor] number [%d,%d]\n",MODNAME,get_major(filp),get_minor(filp));
+
+    printk("%d", next_session);
 
     mutex_lock(&(object->operation_synchronizer));
 
-    if(*off > object->valid_bytes[object->priority]) { 
+    if(*off > object->valid_bytes[session->priority]) { 
  	    mutex_unlock(&(object->operation_synchronizer));
 	    return 0;
     }
 
-    if((object->valid_bytes[object->priority] - *off) < len) {
-        if (object->blocking && object->timeout != 0) {
+    if((object->valid_bytes[session->priority] - *off) < len) {
+        if (session->blocking && session->timeout != 0) {
             // TODO: blocking case
             printk("block");
+            mutex_unlock(&(object->operation_synchronizer));
+            return 0;
         } else {
-            len = object->valid_bytes[object->priority] - *off;
+            len = object->valid_bytes[session->priority] - *off;
         }
     } 
 
-    ret = copy_to_user(buff, &(object->stream[object->priority][object->begin[object->priority]]), len);
+    ret = copy_to_user(buff, &(object->stream[session->priority][object->begin[session->priority]]), len);
 
-    object->begin[object->priority] = (object->begin[object->priority] + (len - ret))%OBJECT_MAX_SIZE;
-    object->valid_bytes[object->priority] = object->valid_bytes[object->priority] - (len - ret);
+    object->begin[session->priority] = (object->begin[session->priority] + (len - ret))%OBJECT_MAX_SIZE;
+    object->valid_bytes[session->priority] = object->valid_bytes[session->priority] - (len - ret);
 
     mutex_unlock(&(object->operation_synchronizer));
 
-    printk("%ld byte are read", (len-ret));
+    printk("%ld byte are read (begin = %d, offset = %d)", (len-ret), object->begin[session->priority], object->valid_bytes[session->priority]);
 
     return len - ret;
 }
@@ -193,6 +216,7 @@ static ssize_t dev_ioctl(struct file *filp, unsigned int command, unsigned long 
 }
 
 static struct file_operations fops = {
+    .owner = THIS_MODULE,
     .write = dev_write,
     .read = dev_read,
     .open =  dev_open,
@@ -212,10 +236,10 @@ int init_module(void) {
     }
 
     // setup of structures
+    next_session = 0;
+
     for (i = 0; i < MINOR_NUMBER; i++) {
         mutex_init(&(files[i].operation_synchronizer));
-
-        files[i].priority = HIGH_PRIORITY;
 
         files[i].stream[LOW_PRIORITY] = NULL;
         files[i].stream[LOW_PRIORITY] = (char*)__get_free_page(GFP_KERNEL);
