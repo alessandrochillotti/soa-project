@@ -11,7 +11,7 @@ char buff[4096];
 #define DATA "ciao a tutti\n"
 #define SIZE strlen(DATA)
 
-void * the_thread(void* path){
+void *the_thread(void* path){
 
 	char* device;
 	int fd;
@@ -25,7 +25,7 @@ void * the_thread(void* path){
 		printf("open error on device %s\n", device);
 		return NULL;
 	}
-	
+
 	printf("device %s successfully opened\n", device);
 	ioctl(fd,1);
 	
