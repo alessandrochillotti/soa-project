@@ -6,4 +6,7 @@
 #define SESSION_PER_FILE 10
 #define FLOWS 2
 
+#define LOW_PRIORITY 0
+#define HIGH_PRIORITY 1
+
 #endif

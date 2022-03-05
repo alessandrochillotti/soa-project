@@ -23,9 +23,6 @@ MODULE_AUTHOR("Alessandro Chillotti");
 #define MODNAME "CHAR DEV"
 #define DEVICE_NAME "multi-flow device"
 
-#define HIGH_PRIORITY 1
-#define LOW_PRIORITY 0
-
 static int dev_open(struct inode *, struct file *);
 static int dev_release(struct inode *, struct file *);
 static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
@@ -44,11 +41,16 @@ static int Major;
 /* struct to abstract IO object */
 typedef struct object {
     struct mutex operation_synchronizer;
-
-    char* stream[FLOWS];        // circular buffer
-    int begin[FLOWS];           // first byte to read
-    int valid_bytes[FLOWS];     // valid_bytes + begin = point to write
+    circular_buffer_t *buffer[FLOWS];
 } object_t;
+
+// typedef struct object {
+//     struct mutex operation_synchronizer;
+
+//     char* stream[FLOWS];        // circular buffer
+//     int begin[FLOWS];           // first byte to read
+//     int valid_bytes[FLOWS];     // valid_bytes + begin = point to write
+// } object_t;
 
 typedef struct session {
     int priority;
@@ -71,7 +73,7 @@ static int dev_open(struct inode *inode, struct file *file) {
 	    return -ENODEV;
     }
 
-    session = kmalloc(sizeof(session), GFP_KERNEL);
+    session = kmalloc(sizeof(session_t), GFP_KERNEL);
     if (session == NULL) return -ENOMEM;
 
     session->priority = HIGH_PRIORITY;
@@ -104,12 +106,16 @@ unsigned long my_copy_from_user (char **to_buffer, const char __user * from_buff
     
     unsigned long ret;
 
+    printk("dovrei scrivere %s", from_buffer);
+
     if (seek_buffer + n >= OBJECT_MAX_SIZE) { // end of buffer reached
         ret = copy_from_user(to_buffer[seek_buffer], from_buffer, OBJECT_MAX_SIZE - seek_buffer);
         ret = copy_from_user(to_buffer[0], from_buffer + (OBJECT_MAX_SIZE - seek_buffer), (n - OBJECT_MAX_SIZE - seek_buffer));
     } else {
         ret = copy_from_user(to_buffer[seek_buffer], from_buffer, n);
     }
+
+    printk("adesso abbiamo: %s", to_buffer[seek_buffer]);
 
     return ret;
 }
@@ -135,7 +141,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 	    return -ENOSPC; // no space left on device
     }
 
-    if (*off > object->valid_bytes[session->priority]) { // offset beyond the current stream size
+    if (*off > object->buffer[session->priority]->valid_bytes) { // offset beyond the current stream size
  	    mutex_unlock(&(object->operation_synchronizer));
 	    return -ENOSR; // out of stream resources
     }
@@ -155,21 +161,22 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
     if (session->priority == HIGH_PRIORITY) {
         printk("HIGH PRIORITY");
 
-        seek_buffer = (object->begin[HIGH_PRIORITY] + object->valid_bytes[HIGH_PRIORITY])%OBJECT_MAX_SIZE;
+        seek_buffer = (object->buffer[HIGH_PRIORITY]->begin + object->buffer[HIGH_PRIORITY]->valid_bytes)%OBJECT_MAX_SIZE;
 
-        ret = my_copy_from_user(&(object->stream[HIGH_PRIORITY]), buff, len, seek_buffer);
+        ret = circular_copy_from_user(object->buffer[HIGH_PRIORITY], buff, len);
+        // ret = my_copy_from_user(&(object->buffer[HIGH_PRIORITY]->stream), buff, len, seek_buffer);
         // ret = copy_from_user(&(object->stream[HIGH_PRIORITY][seek_buffer]), buff, len);
 
-        object->valid_bytes[HIGH_PRIORITY] = object->valid_bytes[HIGH_PRIORITY] + (len - ret);
+        object->buffer[HIGH_PRIORITY]->valid_bytes = object->buffer[HIGH_PRIORITY]->valid_bytes + (len - ret);
     } else {
         // TODO: write in LOW_PRIORITY case
     }
 
     *off += (len - ret);
-    object->valid_bytes[session->priority] = *off;
+    object->buffer[session->priority]->valid_bytes = *off;
     mutex_unlock(&(object->operation_synchronizer));
 
-    printk("%ld byte are written (begin = %d, offset = %d)", (len-ret), object->begin[session->priority], object->valid_bytes[session->priority]);
+    printk("%ld byte are written (begin = %d, offset = %d)", (len-ret), object->buffer[session->priority]->begin, object->buffer[session->priority]->valid_bytes);
     return len-ret;
 }
 
@@ -177,12 +184,16 @@ unsigned long my_copy_to_user (char __user *to_buffer, const char *from_buffer, 
 
     unsigned long ret;
 
+    printk("dovrei leggere %s", from_buffer + begin);
+
     if (begin + n >= OBJECT_MAX_SIZE) { // end of buffer reached
         ret = copy_to_user(to_buffer, from_buffer + begin, OBJECT_MAX_SIZE - begin);
         ret = copy_to_user(to_buffer + (OBJECT_MAX_SIZE - begin), from_buffer, (n - OBJECT_MAX_SIZE - begin));
     } else {
         ret = copy_to_user(to_buffer, from_buffer + begin, n);
     }
+
+    printk("ho letto %s", to_buffer);
 
     return ret;
 }
@@ -203,33 +214,34 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off) 
 
     mutex_lock(&(object->operation_synchronizer));
 
-    if(*off > object->valid_bytes[session->priority]) { 
+    if(*off > object->buffer[session->priority]->valid_bytes) { 
  	    mutex_unlock(&(object->operation_synchronizer));
 	    return 0;
     }
 
-    if((object->valid_bytes[session->priority] - *off) < len) {
+    if((object->buffer[session->priority]->valid_bytes - *off) < len) {
         if (session->blocking && session->timeout != 0) {
             // TODO: blocking case
             printk("block");
             mutex_unlock(&(object->operation_synchronizer));
             return 0;
         } else {
-            len = object->valid_bytes[session->priority] - *off;
+            len = object->buffer[session->priority]->valid_bytes - *off;
         }
     }
 
-    ret = my_copy_to_user(buff, object->stream[session->priority], len, object->begin[session->priority]);
+    ret = circular_copy_to_user(buff, *object->buffer[session->priority], len);
+    // ret = my_copy_to_user(buff, object->buffer[session->priority]->stream, len, object->buffer[session->priority]->begin);
     // ret = copy_to_user(buff, &(object->stream[session->priority][object->begin[session->priority]]), len);
 
     printk("ho letto %s", buff);
 
-    object->begin[session->priority] = (object->begin[session->priority] + (len - ret))%OBJECT_MAX_SIZE;
-    object->valid_bytes[session->priority] = object->valid_bytes[session->priority] - (len - ret);
+    object->buffer[session->priority]->begin = (object->buffer[session->priority]->begin + (len - ret))%OBJECT_MAX_SIZE;
+    object->buffer[session->priority]->valid_bytes = object->buffer[session->priority]->valid_bytes - (len - ret);
 
     mutex_unlock(&(object->operation_synchronizer));
 
-    printk("%ld byte are read (begin = %d, offset = %d)", (len-ret), object->begin[session->priority], object->valid_bytes[session->priority]);
+    printk("%ld byte are read (begin = %d, offset = %d)", (len-ret), object->buffer[session->priority]->begin, object->buffer[session->priority]->valid_bytes);
 
     return len - ret;
 }
@@ -279,23 +291,21 @@ int init_module(void) {
     for (i = 0; i < MINOR_NUMBER; i++) {
         mutex_init(&(files[i].operation_synchronizer));
 
-        files[i].stream[LOW_PRIORITY] = NULL;
-        files[i].stream[LOW_PRIORITY] = (char*)__get_free_page(GFP_KERNEL);
-        files[i].begin[LOW_PRIORITY] = 0;
-        files[i].valid_bytes[LOW_PRIORITY] = 0;
+        files[i].buffer[LOW_PRIORITY] = kmalloc(sizeof(circular_buffer_t), GFP_KERNEL);
+        files[i].buffer[HIGH_PRIORITY] = kmalloc(sizeof(circular_buffer_t), GFP_KERNEL);
 
-        files[i].stream[HIGH_PRIORITY] = NULL;
-        files[i].stream[HIGH_PRIORITY] = (char*)__get_free_page(GFP_KERNEL);
-        files[i].begin[HIGH_PRIORITY] = 0;
-        files[i].valid_bytes[HIGH_PRIORITY] = 0;
+        if (files[i].buffer[LOW_PRIORITY] == NULL || files[i].buffer[HIGH_PRIORITY] == NULL) break;
 
-        if ((files[i].stream[LOW_PRIORITY] == NULL) || (files[i].stream[HIGH_PRIORITY] == NULL)) break; 
+        if (init_circular_buffer(files[i].buffer[LOW_PRIORITY]) == ENOMEM || init_circular_buffer(files[i].buffer[HIGH_PRIORITY]) == ENOMEM) break; 
     }
 
     if (i < MINOR_NUMBER) {
         for (; i > -1; i--) {
-		    free_page((unsigned long) files[i].stream[LOW_PRIORITY]);
-            free_page((unsigned long) files[i].stream[HIGH_PRIORITY]);
+		    free_circular_buffer(files[i].buffer[LOW_PRIORITY]);
+            free_circular_buffer(files[i].buffer[HIGH_PRIORITY]);
+
+            kfree(files[i].buffer[LOW_PRIORITY]);
+            kfree(files[i].buffer[HIGH_PRIORITY]);
 	    }
 
         return -ENOMEM;
@@ -312,8 +322,11 @@ void cleanup_module(void) {
     
     // deallocation of structures
     for (i = 0; i < MINOR_NUMBER; i++) {
-        free_page((unsigned long) files[i].stream[LOW_PRIORITY]);
-        free_page((unsigned long) files[i].stream[HIGH_PRIORITY]);
+        free_circular_buffer(files[i].buffer[LOW_PRIORITY]);
+        free_circular_buffer(files[i].buffer[HIGH_PRIORITY]);
+
+        kfree(files[i].buffer[LOW_PRIORITY]);
+        kfree(files[i].buffer[HIGH_PRIORITY]);
     }
 
     unregister_chrdev(Major, DEVICE_NAME);
