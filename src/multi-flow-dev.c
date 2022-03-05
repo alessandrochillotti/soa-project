@@ -102,24 +102,6 @@ static int dev_release(struct inode *inode, struct file *file) {
     return 0;
 }
 
-unsigned long my_copy_from_user (char **to_buffer, const char __user * from_buffer, unsigned long n, int seek_buffer) {
-    
-    unsigned long ret;
-
-    printk("dovrei scrivere %s", from_buffer);
-
-    if (seek_buffer + n >= OBJECT_MAX_SIZE) { // end of buffer reached
-        ret = copy_from_user(to_buffer[seek_buffer], from_buffer, OBJECT_MAX_SIZE - seek_buffer);
-        ret = copy_from_user(to_buffer[0], from_buffer + (OBJECT_MAX_SIZE - seek_buffer), (n - OBJECT_MAX_SIZE - seek_buffer));
-    } else {
-        ret = copy_from_user(to_buffer[seek_buffer], from_buffer, n);
-    }
-
-    printk("adesso abbiamo: %s", to_buffer[seek_buffer]);
-
-    return ret;
-}
-
 static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t *off) {
 
     int minor;
@@ -164,8 +146,6 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         seek_buffer = (object->buffer[HIGH_PRIORITY]->begin + object->buffer[HIGH_PRIORITY]->valid_bytes)%OBJECT_MAX_SIZE;
 
         ret = circular_copy_from_user(object->buffer[HIGH_PRIORITY], buff, len);
-        // ret = my_copy_from_user(&(object->buffer[HIGH_PRIORITY]->stream), buff, len, seek_buffer);
-        // ret = copy_from_user(&(object->stream[HIGH_PRIORITY][seek_buffer]), buff, len);
 
         object->buffer[HIGH_PRIORITY]->valid_bytes = object->buffer[HIGH_PRIORITY]->valid_bytes + (len - ret);
     } else {
@@ -178,24 +158,6 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
     printk("%ld byte are written (begin = %d, offset = %d)", (len-ret), object->buffer[session->priority]->begin, object->buffer[session->priority]->valid_bytes);
     return len-ret;
-}
-
-unsigned long my_copy_to_user (char __user *to_buffer, const char *from_buffer, unsigned long n, int begin) {
-
-    unsigned long ret;
-
-    printk("dovrei leggere %s", from_buffer + begin);
-
-    if (begin + n >= OBJECT_MAX_SIZE) { // end of buffer reached
-        ret = copy_to_user(to_buffer, from_buffer + begin, OBJECT_MAX_SIZE - begin);
-        ret = copy_to_user(to_buffer + (OBJECT_MAX_SIZE - begin), from_buffer, (n - OBJECT_MAX_SIZE - begin));
-    } else {
-        ret = copy_to_user(to_buffer, from_buffer + begin, n);
-    }
-
-    printk("ho letto %s", to_buffer);
-
-    return ret;
 }
 
 static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off) {
@@ -231,10 +193,6 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off) 
     }
 
     ret = circular_copy_to_user(buff, *object->buffer[session->priority], len);
-    // ret = my_copy_to_user(buff, object->buffer[session->priority]->stream, len, object->buffer[session->priority]->begin);
-    // ret = copy_to_user(buff, &(object->stream[session->priority][object->begin[session->priority]]), len);
-
-    printk("ho letto %s", buff);
 
     object->buffer[session->priority]->begin = (object->buffer[session->priority]->begin + (len - ret))%OBJECT_MAX_SIZE;
     object->buffer[session->priority]->valid_bytes = object->buffer[session->priority]->valid_bytes - (len - ret);
