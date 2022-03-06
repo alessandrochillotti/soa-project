@@ -30,6 +30,10 @@ void free_circular_buffer(circular_buffer_t *buffer) {
     free_page((unsigned long) buffer->stream[HIGH_PRIORITY]);
 }
 
+int free_bytes(circular_buffer_t *to_buffer) {
+    return OBJECT_MAX_SIZE - to_buffer->valid_bytes;
+}
+
 unsigned long circular_copy_from_user(circular_buffer_t *to_buffer, const char __user * from_buffer, unsigned long n) {
     
     unsigned long ret;
@@ -39,7 +43,7 @@ unsigned long circular_copy_from_user(circular_buffer_t *to_buffer, const char _
 
     if (seek_buffer + n >= OBJECT_MAX_SIZE) { // end of buffer reached
         ret = copy_from_user(to_buffer->stream + seek_buffer, from_buffer, OBJECT_MAX_SIZE - seek_buffer);
-        ret = copy_from_user(to_buffer->stream, from_buffer + (OBJECT_MAX_SIZE - seek_buffer), (n - OBJECT_MAX_SIZE - seek_buffer));
+        ret = copy_from_user(to_buffer->stream, from_buffer + (OBJECT_MAX_SIZE - seek_buffer), (n - (OBJECT_MAX_SIZE - seek_buffer)));
     } else {
         ret = copy_from_user(to_buffer->stream + seek_buffer, from_buffer, n);
     }
@@ -53,7 +57,7 @@ unsigned long circular_copy_to_user(char __user *to_buffer, const circular_buffe
 
     if (from_buffer.begin + n >= OBJECT_MAX_SIZE) { // end of buffer reached
         ret = copy_to_user(to_buffer, from_buffer.stream + from_buffer.begin, OBJECT_MAX_SIZE - from_buffer.begin);
-        ret = copy_to_user(to_buffer + (OBJECT_MAX_SIZE - from_buffer.begin), from_buffer.stream, (n - OBJECT_MAX_SIZE - from_buffer.begin));
+        ret = copy_to_user(to_buffer + (OBJECT_MAX_SIZE - from_buffer.begin), from_buffer.stream, (n - (OBJECT_MAX_SIZE - from_buffer.begin)));
     } else {
         ret = copy_to_user(to_buffer, from_buffer.stream + from_buffer.begin, n);
     }

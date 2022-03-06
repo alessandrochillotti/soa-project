@@ -44,14 +44,6 @@ typedef struct object {
     circular_buffer_t *buffer[FLOWS];
 } object_t;
 
-// typedef struct object {
-//     struct mutex operation_synchronizer;
-
-//     char* stream[FLOWS];        // circular buffer
-//     int begin[FLOWS];           // first byte to read
-//     int valid_bytes[FLOWS];     // valid_bytes + begin = point to write
-// } object_t;
-
 typedef struct session {
     int priority;
     bool blocking;
@@ -118,17 +110,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
     mutex_lock(&(object->operation_synchronizer));
 
-    if (*off >= OBJECT_MAX_SIZE) { // offset too large
- 	    mutex_unlock(&(object->operation_synchronizer));
-	    return -ENOSPC; // no space left on device
-    }
-
-    if (*off > object->buffer[session->priority]->valid_bytes) { // offset beyond the current stream size
- 	    mutex_unlock(&(object->operation_synchronizer));
-	    return -ENOSR; // out of stream resources
-    }
-
-    if ((OBJECT_MAX_SIZE - *off) < len) {
+    if (len > free_bytes(object->buffer[session->priority])) {
         mutex_unlock(&(object->operation_synchronizer));
         if (session->blocking) {
             // TODO: blocking case
@@ -141,8 +123,6 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
     }
 
     if (session->priority == HIGH_PRIORITY) {
-        printk("HIGH PRIORITY");
-
         seek_buffer = (object->buffer[HIGH_PRIORITY]->begin + object->buffer[HIGH_PRIORITY]->valid_bytes)%OBJECT_MAX_SIZE;
 
         ret = circular_copy_from_user(object->buffer[HIGH_PRIORITY], buff, len);
@@ -152,8 +132,6 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         // TODO: write in LOW_PRIORITY case
     }
 
-    *off += (len - ret);
-    object->buffer[session->priority]->valid_bytes = *off;
     mutex_unlock(&(object->operation_synchronizer));
 
     printk("%ld byte are written (begin = %d, offset = %d)", (len-ret), object->buffer[session->priority]->begin, object->buffer[session->priority]->valid_bytes);
@@ -176,19 +154,15 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off) 
 
     mutex_lock(&(object->operation_synchronizer));
 
-    if(*off > object->buffer[session->priority]->valid_bytes) { 
- 	    mutex_unlock(&(object->operation_synchronizer));
-	    return 0;
-    }
-
-    if((object->buffer[session->priority]->valid_bytes - *off) < len) {
+    if(len > object->buffer[session->priority]->valid_bytes) {
         if (session->blocking && session->timeout != 0) {
             // TODO: blocking case
             printk("block");
             mutex_unlock(&(object->operation_synchronizer));
             return 0;
         } else {
-            len = object->buffer[session->priority]->valid_bytes - *off;
+            printk("entrato");
+            len = object->buffer[session->priority]->valid_bytes;
         }
     }
 
