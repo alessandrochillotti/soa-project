@@ -1,2 +1,2 @@
 all:
-	gcc user.c -lpthread -o user
+	gcc user.c inout.c -lpthread -o user

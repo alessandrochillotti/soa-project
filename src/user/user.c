@@ -5,61 +5,100 @@
 #include <string.h>
 #include <pthread.h>
 #include <sys/ioctl.h>
+#include "../../lib/my-ioctl.h"
+#include "../../lib/parameters.h"
 
-int i;
-char buff[4096];
-#define DATA "ciao a tutti\n"
-#define SIZE strlen(DATA)
-
-void *the_thread(void* path){
-
-	char* device;
-	int fd;
-
-	device = (char*)path;
-	sleep(1);
-
-	printf("opening device %s\n",device);
-	fd = open(device,O_RDWR);
-	if (fd == -1) {
-		printf("open error on device %s\n", device);
-		return NULL;
-	}
-
-	printf("device %s successfully opened\n", device);
-	ioctl(fd,1);
-	
-	for (i = 0; i<10/*00*/; i++) write(fd, DATA, SIZE);
-	
-	return NULL;
-}
+#include "defines.h"
 
 int main(int argc, char** argv){
+    int ret;
+    int fd;
+    int major;
+    int minor;
+    char *path;
+    char tmp[OBJECT_MAX_SIZE];
+    int num;
+    char op = '0';
 
-     int ret;
-     int major;
-     int minors;
-     char *path;
-     pthread_t tid;
+    char options[8] = {'1', '2', '3', '4', '5', '6', '7', '8'};
 
-     if (argc < 4) {
-	     printf("usage: pathname major minors\n");
-	     return -1;
-     }
+    char command[100];
 
-     path = argv[1];
-     major = strtol(argv[2],NULL,10);
-     minors = strtol(argv[3],NULL,10);
-     printf("creating %d minors for device %s with major %d\n",minors,path,major);
+    if (argc < 4) {
+        printf("usage: pathname major minors\n");
+        return -1;
+    }
 
-     for (i = 0; i < minors; i++) {
-	     sprintf(buff,"mknod %s%d c %d %i\n",path,i,major,i);
-	     system(buff);
-	     sprintf(buff,"%s%d",path,i);
-	     pthread_create(&tid,NULL,the_thread,strdup(buff));
-     }
+    path = argv[1];
+    major = strtol(argv[2],NULL,10);
+    minor = strtol(argv[3],NULL,10);
+    
+    sprintf(command,"mknod %s c %d %d\n",path,major,minor);
+    system(command);
 
-     pause();
-     return 0;
+    // open device
+    fd = open(path, O_RDWR);
+	if (fd == -1) {
+		printf("open error on device %s\n", path);
+		return -1;
+	}
+    
+    while(1) {
+        printf("\033[2J\033[H");
 
+        if (op == '6') {
+            printf("Testo scritto: %s\n\n", tmp);
+        } else if (op == '7') {
+            printf("Testo letto: %s\n\n", tmp);
+        }
+        memset(tmp, 0, OBJECT_MAX_SIZE);
+
+        printf("1. Settare high priority\n");
+        printf("2. Settare low priority\n");
+        printf("3. Operazioni bloccanti\n");
+        printf("4. Operazioni non bloccanti\n");
+        printf("5. Settare timeout\n");
+        printf("6. Scrivere\n");
+        printf("7. Leggere\n");
+        printf("8. Esci\n");
+
+        op = multiChoice("Cosa vuoi fare", options, 8);
+        
+        switch(op){
+                case '1':
+                    ioctl(fd, TO_HIGH_PRIORITY);
+                    break;
+                case '2':
+                    ioctl(fd, TO_LOW_PRIORITY);
+                    break;
+                case '3':
+                    ioctl(fd, BLOCK);
+                    break;
+                case '4':
+                    ioctl(fd, UNBLOCK);
+                    break;
+                case '5':
+                    ioctl(fd, TIMEOUT, 0);
+                    break;
+                case '6':
+                    printf("Inserisci testo da scrivere: ");
+                    fgets(tmp, OBJECT_MAX_SIZE, stdin);
+                    printf("\n");
+                    write(fd, tmp, strlen(tmp));
+                    break;
+                case '7':
+                    printf("Inserisci quanti byte vuoi leggere: ");
+                    scanf("%d", &num);
+                    read(fd, tmp, num);
+                    break;
+                case '8':
+                    close(fd);
+                    return 0;
+                default: 
+                    printf("operazione non disponibile");
+        }
+    }
+
+
+    return 0;
 }

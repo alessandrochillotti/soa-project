@@ -1,5 +1,4 @@
-#ifndef CIRCULARBUFFER_H_
-#define CIRCULARBUFFER_H_
+#pragma once
 
 /* definition of circular buffer */
 typedef struct circular_buffer {
@@ -64,5 +63,3 @@ unsigned long circular_copy_to_user(char __user *to_buffer, const circular_buffe
 
     return ret;
 }
-
-#endif

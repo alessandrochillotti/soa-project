@@ -9,6 +9,7 @@
 #include <linux/fs.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
+#include <linux/workqueue.h>
 #include <linux/pid.h>		/* For pid types */
 #include <linux/tty.h>		/* For the tty declarations */
 #include <linux/version.h>	/* For LINUX_VERSION_CODE */
@@ -27,6 +28,7 @@ static int dev_open(struct inode *, struct file *);
 static int dev_release(struct inode *, struct file *);
 static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
 static ssize_t dev_ioctl(struct file *, unsigned int, unsigned long);
+void deferred_write(unsigned long);
 
 static int Major;
 
@@ -44,13 +46,21 @@ typedef struct object {
     circular_buffer_t *buffer[FLOWS];
 } object_t;
 
+/* session struct */
 typedef struct session {
     int priority;
     bool blocking;
     unsigned long timeout;
 } session_t;
 
+/* delayed work */
+typedef struct packed_work{
+    char* staging_area;             // data to write
+    struct work_struct the_work;
+} packed_work_t;
+
 object_t files[MINOR_NUMBER];
+struct workqueue_struct *workqueue[MINOR_NUMBER];
 
 /* the actual driver */
 
@@ -94,6 +104,11 @@ static int dev_release(struct inode *inode, struct file *file) {
     return 0;
 }
 
+void deferred_write(unsigned long data) {
+    char *buffer = container_of((void*)data,packed_work_t,the_work)->staging_area;
+    printk("delayed print: %s", buffer);
+}
+
 static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t *off) {
 
     int minor;
@@ -123,18 +138,40 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
     }
 
     if (session->priority == HIGH_PRIORITY) {
+        printk("HIGH");
+
         seek_buffer = (object->buffer[HIGH_PRIORITY]->begin + object->buffer[HIGH_PRIORITY]->valid_bytes)%OBJECT_MAX_SIZE;
-
         ret = circular_copy_from_user(object->buffer[HIGH_PRIORITY], buff, len);
-
+        
         object->buffer[HIGH_PRIORITY]->valid_bytes = object->buffer[HIGH_PRIORITY]->valid_bytes + (len - ret);
     } else {
-        // TODO: write in LOW_PRIORITY case
+        packed_work_t *the_task;
+
+        the_task =  kmalloc(sizeof(packed_work_t),GFP_KERNEL);
+        if (the_task == NULL) {
+                printk("%s: work queue buffer allocation failure\n",MODNAME);
+                module_put(THIS_MODULE);
+                return -1;
+        }
+
+        the_task->staging_area = kmalloc(strlen(buff),GFP_KERNEL);
+        if (the_task->staging_area == NULL) {
+                printk("%s: staging area allocation failure\n",MODNAME);
+                module_put(THIS_MODULE);
+                return -1;
+        }
+
+        strcpy(the_task->staging_area, buff);
+
+        __INIT_WORK(&(the_task->the_work),(void*)deferred_write,(unsigned long)(&(the_task->the_work)));
+
+        schedule_work(&(the_task->the_work));
     }
 
     mutex_unlock(&(object->operation_synchronizer));
 
     printk("%ld byte are written (begin = %d, offset = %d)", (len-ret), object->buffer[session->priority]->begin, object->buffer[session->priority]->valid_bytes);
+
     return len-ret;
 }
 
@@ -183,7 +220,7 @@ static ssize_t dev_ioctl(struct file *filp, unsigned int command, unsigned long 
     session_t *session = (session_t *)filp->private_data;
 
     switch (command) {
-        case TO_HIGH_PRIORITY:  session->priority = HIGH_PRIORITY;  
+        case TO_HIGH_PRIORITY:  session->priority = HIGH_PRIORITY;
                             break;
         case TO_LOW_PRIORITY:   session->priority = LOW_PRIORITY;  
                             break;
@@ -221,6 +258,8 @@ int init_module(void) {
 
     // setup of structures
     for (i = 0; i < MINOR_NUMBER; i++) {
+        workqueue[i] = create_workqueue("work-queue-" + i);
+        
         mutex_init(&(files[i].operation_synchronizer));
 
         files[i].buffer[LOW_PRIORITY] = kmalloc(sizeof(circular_buffer_t), GFP_KERNEL);
