@@ -16,13 +16,14 @@ int main(int argc, char** argv){
     int major;
     int minor;
     char *path;
-    char tmp[OBJECT_MAX_SIZE];
+
     int num;
     char op = '0';
 
     char options[8] = {'1', '2', '3', '4', '5', '6', '7', '8'};
 
     char command[100];
+    char tmp[OBJECT_MAX_SIZE];
 
     if (argc < 4) {
         printf("usage: pathname major minors\n");
@@ -47,9 +48,9 @@ int main(int argc, char** argv){
         printf("\033[2J\033[H");
 
         if (op == '6') {
-            printf("Testo scritto: %s\n\n", tmp);
+            printf("Scrittura: %s (%d byte)\n\n", tmp, ret);
         } else if (op == '7') {
-            printf("Testo letto: %s\n\n", tmp);
+            printf("Lettura: %s (%d byte)\n\n", tmp, ret);
         }
         memset(tmp, 0, OBJECT_MAX_SIZE);
 
@@ -83,13 +84,12 @@ int main(int argc, char** argv){
                 case '6':
                     printf("Inserisci testo da scrivere: ");
                     fgets(tmp, OBJECT_MAX_SIZE, stdin);
-                    printf("\n");
-                    write(fd, tmp, strlen(tmp));
+                    ret = write(fd, tmp, strlen(tmp));
                     break;
                 case '7':
                     printf("Inserisci quanti byte vuoi leggere: ");
                     scanf("%d", &num);
-                    read(fd, tmp, num);
+                    ret = read(fd, tmp, num);
                     break;
                 case '8':
                     close(fd);
