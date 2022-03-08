@@ -80,7 +80,7 @@ unsigned long read_dynamic_buffer(dynamic_buffer_t *buffer, char *read_content, 
     cur = buffer->head;
 
     // read whole blocks
-    while (cur == NULL && (len - byte_read > cur->size - cur->byte_read)) {
+    while (cur != NULL && (len - byte_read > cur->size - cur->byte_read)) {
         memcpy(read_content + byte_read, cur->content + cur->byte_read, cur->size - cur->byte_read);
         
         byte_read += cur->size - cur->byte_read;

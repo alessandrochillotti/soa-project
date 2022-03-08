@@ -43,7 +43,7 @@ static int Major;
 
 /* struct to abstract IO object */
 typedef struct object {
-    // variables
+    struct workqueue_struct *workqueue;
     dynamic_buffer_t *buffer[FLOWS];
 } object_t;
 
@@ -57,12 +57,12 @@ typedef struct session {
 /* delayed work */
 typedef struct packed_work{
     char* staging_area;             // data to write
+    int size;
     int minor;
     struct work_struct the_work;
 } packed_work_t;
 
 object_t files[MINOR_NUMBER];
-struct workqueue_struct *workqueue[MINOR_NUMBER];
 
 /* the actual driver */
 
@@ -80,7 +80,7 @@ static int dev_open(struct inode *inode, struct file *file) {
     session = kmalloc(sizeof(session_t), GFP_KERNEL);
     if (session == NULL) return -ENOMEM;
 
-    session->priority = HIGH_PRIORITY;
+    session->priority = LOW_PRIORITY;
     session->blocking = false;
     session->timeout = 0;
 
@@ -107,14 +107,13 @@ static int dev_release(struct inode *inode, struct file *file) {
 }
 
 void deferred_write(unsigned long data) {
-    char *buffer = container_of((void*)data,packed_work_t,the_work)->staging_area;
 
-    // TODO: implement deferred write
-    // seek_buffer = (object->buffer[HIGH_PRIORITY]->begin + object->buffer[HIGH_PRIORITY]->valid_bytes)%OBJECT_MAX_SIZE;
-    // ret = circular_copy_from_user(object->buffer[HIGH_PRIORITY], buff, len);
-    // object->buffer[HIGH_PRIORITY]->valid_bytes = object->buffer[HIGH_PRIORITY]->valid_bytes + (len - ret);
+    packed_work_t *work = container_of((void*)data,packed_work_t,the_work);
+    object_t *object = files + work->minor;
 
-    printk("delayed print: %s", buffer);
+    write_dynamic_buffer(object->buffer[LOW_PRIORITY], work->staging_area, work->size);
+
+    kfree(container_of((void*)data,packed_work_t,the_work));
 }
 
 static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t *off) {
@@ -133,20 +132,6 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
     mutex_lock(&(object->buffer[session->priority]->operation_synchronizer));
 
-
-    /* block case -> not for write */
-    // if (free_bytes(object->buffer[session->priority]) == 0) {
-    //     mutex_unlock(&(object->operation_synchronizer));
-    //     if (session->blocking) {
-    //         // TODO: blocking case with condition free_bytes != 0
-    //         printk("block");
-    //         return 0;
-    //     } else {
-    //         // len = OBJECT_MAX_SIZE - *off;
-    //         return -ENOSPC;
-    //     }
-    // }
-
     if (session->priority == HIGH_PRIORITY) {
 
         temp_buffer = kmalloc(len, GFP_KERNEL);
@@ -154,34 +139,31 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
         ret = copy_from_user(temp_buffer, buff, len);
 
-        write_dynamic_buffer(object->buffer[session->priority], temp_buffer, len);
+        write_dynamic_buffer(object->buffer[HIGH_PRIORITY], temp_buffer, len);
     } else {
         packed_work_t *the_task;
 
         the_task =  kmalloc(sizeof(packed_work_t),GFP_KERNEL);
         if (the_task == NULL) {
             printk("%s: work queue buffer allocation failure\n",MODNAME);
-            module_put(THIS_MODULE);
             return -1;
         }
 
         the_task->staging_area = kmalloc(len, GFP_KERNEL);
         if (the_task->staging_area == NULL) {
             printk("%s: staging area allocation failure\n",MODNAME);
-            module_put(THIS_MODULE);
             return -1;
         }
 
         // Fill struct
         ret = copy_from_user(the_task->staging_area, buff, len);
         the_task->minor = minor;
+        the_task->size = len;
 
         __INIT_WORK(&(the_task->the_work),(void*)deferred_write,(unsigned long)(&(the_task->the_work)));
         ret = 0;
 
-        // queue_work(workqueue[minor], &(the_task->the_work));
-
-        schedule_work(&the_task->the_work);
+        queue_work(object->workqueue, &(the_task->the_work));
     }
 
     mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
@@ -214,10 +196,10 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off) 
             // TODO: blocking case with condition byte_in_buffer != 0
             printk("blocking case");
             mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
-            return 0;
         } else {
-            return 0;
+            mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
         }
+        return 0;
     }
 
     if(len > object->buffer[session->priority]->byte_in_buffer) len = object->buffer[session->priority]->byte_in_buffer;
@@ -274,8 +256,7 @@ int init_module(void) {
 
     // setup of structures
     for (i = 0; i < MINOR_NUMBER; i++) {
-        workqueue[i] = create_singlethread_workqueue("work-queue-" + i);
-        
+        files[i].workqueue = create_singlethread_workqueue("work-queue-" + i);
         files[i].buffer[LOW_PRIORITY] = kmalloc(sizeof(dynamic_buffer_t), GFP_KERNEL);
         files[i].buffer[HIGH_PRIORITY] = kmalloc(sizeof(dynamic_buffer_t), GFP_KERNEL);
 
@@ -304,6 +285,8 @@ void cleanup_module(void) {
     
     // deallocation of structures
     for (i = 0; i < MINOR_NUMBER; i++) {
+        destroy_workqueue(files[i].workqueue);
+
         free_dynamic_buffer(files[i].buffer[LOW_PRIORITY]);
         free_dynamic_buffer(files[i].buffer[HIGH_PRIORITY]);
     }
