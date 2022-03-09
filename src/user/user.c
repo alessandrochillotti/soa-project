@@ -10,6 +10,8 @@
 
 #include "defines.h"
 
+#define MAX_TMP_SIZE 50
+
 int main(int argc, char** argv){
     int ret;
     int fd;
@@ -24,7 +26,7 @@ int main(int argc, char** argv){
     char options[8] = {'1', '2', '3', '4', '5', '6', '7', '8'};
 
     char command[100];
-    char tmp[OBJECT_MAX_SIZE];
+    char tmp[MAX_TMP_SIZE];
 
     if (argc < 4) {
         printf("usage: pathname major minors\n");
@@ -47,13 +49,13 @@ int main(int argc, char** argv){
     
     while(1) {
         printf("\033[2J\033[H");
-
+        
         if (op == '6') {
-            printf("Scrittura: %s (%d byte)\n\n", tmp, ret);
+            printf("Scritti primi %d byte di %s\n\n", ret, tmp);
         } else if (op == '7') {
             printf("Lettura: %s (%d byte)\n\n", tmp, ret);
         }
-        memset(tmp, 0, OBJECT_MAX_SIZE);
+        memset(tmp, 0, MAX_TMP_SIZE);
 
         printf("1. Settare high priority\n");
         printf("2. Settare low priority\n");
@@ -88,7 +90,7 @@ int main(int argc, char** argv){
                     break;
                 case '6':
                     printf("Inserisci testo da scrivere: ");
-                    fgets(tmp, OBJECT_MAX_SIZE, stdin);
+                    fgets(tmp, MAX_TMP_SIZE, stdin);
                     ret = write(fd, tmp, strlen(tmp));
                     break;
                 case '7':
