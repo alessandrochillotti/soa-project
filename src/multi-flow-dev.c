@@ -16,7 +16,6 @@
 
 #include "../lib/parameters.h"
 #include "../lib/my-ioctl.h"
-#include "../lib/circular-buffer.h"
 #include "../lib/dynamic-buffer.h"
 
 MODULE_LICENSE("GPL");
@@ -82,7 +81,7 @@ static int dev_open(struct inode *inode, struct file *file) {
 
     session->priority = HIGH_PRIORITY;
     session->blocking = true;
-    session->timeout = 1000;
+    session->timeout = 10;
 
     file->private_data = session;
 
@@ -113,7 +112,7 @@ void deferred_write(unsigned long data) {
 
     write_dynamic_buffer(object->buffer[LOW_PRIORITY], work->staging_area, work->size);
 
-    wake_up(&(object->buffer[LOW_PRIORITY]->waitqueue));
+    wake_up(&(object->buffer[LOW_PRIORITY]->reader_waitqueue));
 
     kfree(container_of((void*)data,packed_work_t,the_work));
 }
@@ -134,6 +133,26 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
     mutex_lock(&(object->buffer[session->priority]->operation_synchronizer));
 
+    if(object->buffer[session->priority]->byte_in_buffer == MAX_BYTE_IN_BUFFER) {
+        if (session->blocking && session->timeout != 0) {
+            mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
+
+            ret = wait_event_interruptible_timeout(object->buffer[session->priority]->writer_waitqueue, object->buffer[session->priority]->byte_in_buffer < MAX_BYTE_IN_BUFFER, session->timeout*SCALING);
+
+            if (ret == 0) { // timeout elapsed
+                return 0;
+            } else if (ret == 1) { // condition evaluated
+                mutex_lock(&(object->buffer[session->priority]->operation_synchronizer));
+            }
+            
+        } else {
+            mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
+            return 0;
+        }
+    }
+
+    if(len > MAX_BYTE_IN_BUFFER - object->buffer[session->priority]->byte_in_buffer) len = MAX_BYTE_IN_BUFFER - object->buffer[session->priority]->byte_in_buffer;
+
     if (session->priority == HIGH_PRIORITY) {
 
         temp_buffer = kmalloc(len, GFP_KERNEL);
@@ -143,7 +162,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
         write_dynamic_buffer(object->buffer[HIGH_PRIORITY], temp_buffer, len);
 
-        wake_up(&(object->buffer[HIGH_PRIORITY]->waitqueue));
+        wake_up(&(object->buffer[HIGH_PRIORITY]->reader_waitqueue));
     } else {
         packed_work_t *the_task;
 
@@ -193,21 +212,15 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off) 
 
     mutex_lock(&(object->buffer[session->priority]->operation_synchronizer));
 
-    // printk("byte_in_buffer = %d", object->buffer[session->priority]->byte_in_buffer);
-
     if(object->buffer[session->priority]->byte_in_buffer == 0) {
         if (session->blocking && session->timeout != 0) {
             mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
 
-            printk("i'm blocking");
-            ret = wait_event_interruptible_timeout(object->buffer[session->priority]->waitqueue, object->buffer[session->priority]->byte_in_buffer != 0, session->timeout*SCALING);
-            printk("unblocked");
+            ret = wait_event_interruptible_timeout(object->buffer[session->priority]->reader_waitqueue, object->buffer[session->priority]->byte_in_buffer != 0, session->timeout*SCALING);
 
             if (ret == 0) { // timeout elapsed
-                printk("timeout elapsed");
                 return 0;
             } else if (ret == 1) { // condition evaluated
-                printk("condition evaluated");
                 mutex_lock(&(object->buffer[session->priority]->operation_synchronizer));
             }
             
@@ -220,6 +233,8 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off) 
     if(len > object->buffer[session->priority]->byte_in_buffer) len = object->buffer[session->priority]->byte_in_buffer;
 
     ret = read_dynamic_buffer(object->buffer[session->priority], buff, len);
+
+    wake_up(&(object->buffer[session->priority]->writer_waitqueue));
 
     mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
 
