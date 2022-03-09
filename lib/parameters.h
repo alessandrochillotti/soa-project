@@ -6,3 +6,5 @@
 
 #define LOW_PRIORITY 0
 #define HIGH_PRIORITY 1
+
+#define SCALING 1000

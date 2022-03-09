@@ -80,9 +80,9 @@ static int dev_open(struct inode *inode, struct file *file) {
     session = kmalloc(sizeof(session_t), GFP_KERNEL);
     if (session == NULL) return -ENOMEM;
 
-    session->priority = LOW_PRIORITY;
-    session->blocking = false;
-    session->timeout = 0;
+    session->priority = HIGH_PRIORITY;
+    session->blocking = true;
+    session->timeout = 1000;
 
     file->private_data = session;
 
@@ -113,6 +113,8 @@ void deferred_write(unsigned long data) {
 
     write_dynamic_buffer(object->buffer[LOW_PRIORITY], work->staging_area, work->size);
 
+    wake_up(&(object->buffer[LOW_PRIORITY]->waitqueue));
+
     kfree(container_of((void*)data,packed_work_t,the_work));
 }
 
@@ -140,6 +142,8 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         ret = copy_from_user(temp_buffer, buff, len);
 
         write_dynamic_buffer(object->buffer[HIGH_PRIORITY], temp_buffer, len);
+
+        wake_up(&(object->buffer[HIGH_PRIORITY]->waitqueue));
     } else {
         packed_work_t *the_task;
 
@@ -193,13 +197,24 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off) 
 
     if(object->buffer[session->priority]->byte_in_buffer == 0) {
         if (session->blocking && session->timeout != 0) {
-            // TODO: blocking case with condition byte_in_buffer != 0
-            printk("blocking case");
             mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
+
+            printk("i'm blocking");
+            ret = wait_event_interruptible_timeout(object->buffer[session->priority]->waitqueue, object->buffer[session->priority]->byte_in_buffer != 0, session->timeout*SCALING);
+            printk("unblocked");
+
+            if (ret == 0) { // timeout elapsed
+                printk("timeout elapsed");
+                return 0;
+            } else if (ret == 1) { // condition evaluated
+                printk("condition evaluated");
+                mutex_lock(&(object->buffer[session->priority]->operation_synchronizer));
+            }
+            
         } else {
             mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
+            return 0;
         }
-        return 0;
     }
 
     if(len > object->buffer[session->priority]->byte_in_buffer) len = object->buffer[session->priority]->byte_in_buffer;
@@ -258,6 +273,7 @@ int init_module(void) {
     // setup of structures
     for (i = 0; i < MINOR_NUMBER; i++) {
         files[i].workqueue = create_singlethread_workqueue("work-queue-" + i);
+
         files[i].buffer[LOW_PRIORITY] = kmalloc(sizeof(dynamic_buffer_t), GFP_KERNEL);
         files[i].buffer[HIGH_PRIORITY] = kmalloc(sizeof(dynamic_buffer_t), GFP_KERNEL);
 
