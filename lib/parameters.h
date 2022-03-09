@@ -1,6 +1,6 @@
 #pragma once
 
-#define OBJECT_MAX_SIZE 4096
+#define MAX_BYTE_IN_BUFFER 10 // 32*4096  // 32 pagine
 #define MINOR_NUMBER 128
 #define FLOWS 2
 
