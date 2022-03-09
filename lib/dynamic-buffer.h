@@ -89,6 +89,7 @@ unsigned long read_dynamic_buffer(dynamic_buffer_t *buffer, char *read_content, 
         cur = cur->next;
 
         buffer->head = cur;
+        if (buffer->head == buffer->tail) buffer->tail = NULL;
         free_element_buffer(old);
     }
 

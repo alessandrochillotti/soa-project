@@ -49,7 +49,7 @@ typedef struct object {
 
 /* session struct */
 typedef struct session {
-    int priority;
+    unsigned char priority;
     bool blocking;
     unsigned long timeout;
 } session_t;
@@ -189,7 +189,7 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off) 
 
     mutex_lock(&(object->buffer[session->priority]->operation_synchronizer));
 
-    printk("byte_in_buffer = %d", object->buffer[session->priority]->byte_in_buffer);
+    // printk("byte_in_buffer = %d", object->buffer[session->priority]->byte_in_buffer);
 
     if(object->buffer[session->priority]->byte_in_buffer == 0) {
         if (session->blocking && session->timeout != 0) {
@@ -220,13 +220,14 @@ static ssize_t dev_ioctl(struct file *filp, unsigned int command, unsigned long 
     switch (command) {
         case TO_HIGH_PRIORITY:  session->priority = HIGH_PRIORITY;
                             break;
-        case TO_LOW_PRIORITY:   session->priority = LOW_PRIORITY;  
+        case TO_LOW_PRIORITY:   session->priority = LOW_PRIORITY;
                             break;
         case BLOCK:             session->blocking = true;
                             break;
         case UNBLOCK:           session->blocking = false;
                             break;
-        case TIMEOUT:           session->timeout = param;
+        case TIMEOUT:           session->blocking = true;
+                                session->timeout = param;
                             break;
         default:                return 0;
     }

@@ -16,6 +16,7 @@ int main(int argc, char** argv){
     int major;
     int minor;
     char *path;
+    unsigned long timeout;
 
     int num;
     char op = '0';
@@ -67,19 +68,23 @@ int main(int argc, char** argv){
         
         switch(op){
                 case '1':
-                    ioctl(fd, TO_HIGH_PRIORITY);
+                    IOCTL_HIGH_PRIORITY(fd);
                     break;
                 case '2':
-                    ioctl(fd, TO_LOW_PRIORITY);
+                    IOCTL_LOW_PRIORITY(fd);
                     break;
                 case '3':
-                    ioctl(fd, BLOCK);
+                    IOCTL_BLOCK(fd);
                     break;
                 case '4':
-                    ioctl(fd, UNBLOCK);
+                    IOCTL_UNBLOCK(fd);
                     break;
                 case '5':
-                    ioctl(fd, TIMEOUT, 0);
+                    printf("Inserisci il valoro del timeout: ");
+                    do {
+                        scanf("%ld", &timeout);
+                    } while (timeout > 0);
+                    IOCTL_TIMEOUT(fd, timeout);
                     break;
                 case '6':
                     printf("Inserisci testo da scrivere: ");
