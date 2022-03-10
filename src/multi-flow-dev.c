@@ -64,6 +64,14 @@ typedef struct packed_work{
 
 object_t files[MINOR_NUMBER];
 
+bool enabled[MINOR_NUMBER] = {[0 ... (MINOR_NUMBER-1)] = true}; 
+long byte_in_buffer[FLOWS * MINOR_NUMBER]; // first 128 -> low_priority, second 128 -> high_priority
+long thread_in_wait[FLOWS * MINOR_NUMBER];
+
+module_param_array(enabled, bool, NULL, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param_array(byte_in_buffer, long, NULL, S_IRUSR | S_IRGRP);
+module_param_array(thread_in_wait, long, NULL, S_IRUSR | S_IRGRP);
+
 /* the actual driver */
 static int dev_open(struct inode *inode, struct file *file) {
 
@@ -76,20 +84,23 @@ static int dev_open(struct inode *inode, struct file *file) {
 	    return -ENODEV;
     }
 
-    session = kmalloc(sizeof(session_t), GFP_KERNEL);
-    if (session == NULL) return -ENOMEM;
+    if (enabled[minor]) {
+        session = kmalloc(sizeof(session_t), GFP_KERNEL);
+        if (session == NULL) return -ENOMEM;
 
-    session->priority = HIGH_PRIORITY;
-    session->blocking = true;
-    session->timeout = 10;
+        session->priority = HIGH_PRIORITY;
+        session->blocking = true;
+        session->timeout = 10;
 
-    file->private_data = session;
+        file->private_data = session;
 
-    printk("%s: device file successfully opened for object with minor %d\n", MODNAME, minor);
+        printk("%s: device file successfully opened for object with minor %d\n", MODNAME, minor);
+    } else {
+        printk("%s: the session can't be opened %d\n", MODNAME, minor);
+    }
     
     return 0;
 }
-
 
 static int dev_release(struct inode *inode, struct file *file) {
 
@@ -135,11 +146,15 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
     mutex_lock(&(buffer->operation_synchronizer));
 
-    if(buffer->byte_in_buffer == MAX_BYTE_IN_BUFFER) {
+    if(byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] == MAX_BYTE_IN_BUFFER) {
         if (session->blocking && session->timeout != 0) {
             mutex_unlock(&(buffer->operation_synchronizer));
 
-            ret = wait_event_interruptible_timeout(buffer->waitqueue, object->buffer[session->priority]->byte_in_buffer < MAX_BYTE_IN_BUFFER, session->timeout*SCALING);
+            __sync_fetch_and_add(&(thread_in_wait[(session->priority * MINOR_NUMBER) + minor]),1);
+
+            ret = wait_event_interruptible_timeout(buffer->waitqueue, byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] < MAX_BYTE_IN_BUFFER, session->timeout*SCALING);
+
+            __sync_fetch_and_sub(&(thread_in_wait[(session->priority * MINOR_NUMBER) + minor]),1);
 
             if (ret == 0) { // timeout elapsed
                 return 0;
@@ -153,7 +168,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         }
     }
 
-    if(len > MAX_BYTE_IN_BUFFER - buffer->byte_in_buffer) len = MAX_BYTE_IN_BUFFER - buffer->byte_in_buffer;
+    if(len > MAX_BYTE_IN_BUFFER - byte_in_buffer[(session->priority * MINOR_NUMBER) + minor]) len = MAX_BYTE_IN_BUFFER - byte_in_buffer[(session->priority * MINOR_NUMBER) + minor];
 
     if (session->priority == HIGH_PRIORITY) {
 
@@ -164,7 +179,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
         write_dynamic_buffer(buffer, temp_buffer, len);
 
-        buffer->byte_in_buffer += len;
+        byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] += len;
 
         wake_up(&(buffer->waitqueue));
     } else {
@@ -190,7 +205,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         __INIT_WORK(&(the_task->the_work),(void*)deferred_write,(unsigned long)(&(the_task->the_work)));
         ret = 0;
 
-        buffer->byte_in_buffer += len;
+        byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] += len;
 
         queue_work(object->workqueue, &(the_task->the_work));
     }
@@ -219,11 +234,15 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off) 
 
     mutex_lock(&(buffer->operation_synchronizer));
 
-    if(buffer->byte_in_buffer == 0) {
+    if(byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] == 0) {
         if (session->blocking && session->timeout != 0) {
             mutex_unlock(&(buffer->operation_synchronizer));
 
-            ret = wait_event_interruptible_timeout(buffer->waitqueue, buffer->byte_in_buffer != 0, session->timeout*SCALING);
+            __sync_fetch_and_add(&(thread_in_wait[(session->priority * MINOR_NUMBER) + minor]),1);
+
+            ret = wait_event_interruptible_timeout(buffer->waitqueue, byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] != 0, session->timeout*SCALING);
+
+            __sync_fetch_and_sub(&(thread_in_wait[(session->priority * MINOR_NUMBER) + minor]),1);
 
             if (ret == 0) { // timeout elapsed
                 return 0;
@@ -237,9 +256,11 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off) 
         }
     }
 
-    if(len > buffer->byte_in_buffer) len = buffer->byte_in_buffer;
+    if(len > byte_in_buffer[(session->priority * MINOR_NUMBER) + minor]) len = byte_in_buffer[(session->priority * MINOR_NUMBER) + minor];
 
     ret = read_dynamic_buffer(buffer, buff, len);
+
+    byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] -= len;
 
     wake_up(&(buffer->waitqueue));
 

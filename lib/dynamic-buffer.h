@@ -12,7 +12,7 @@ typedef struct buffer_element {
 typedef struct dynamic_buffer {
     buffer_element_t* head;     // head pointer to read
     buffer_element_t* tail;     // tail pointer to attach new written block
-    int byte_in_buffer;
+    // int byte_in_buffer;
     struct mutex operation_synchronizer;
     wait_queue_head_t waitqueue;
 } dynamic_buffer_t;
@@ -30,7 +30,7 @@ int init_dynamic_buffer(dynamic_buffer_t *buffer) {
     
     buffer->head = NULL;
     buffer->tail = NULL;
-    buffer->byte_in_buffer = 0;
+    // buffer->byte_in_buffer = 0;
 
     mutex_init(&(buffer->operation_synchronizer));
 
@@ -101,7 +101,7 @@ unsigned long read_dynamic_buffer(dynamic_buffer_t *buffer, char *read_content, 
         byte_read += len - byte_read;
     }
 
-    buffer->byte_in_buffer -= byte_read;
+    // buffer->byte_in_buffer -= byte_read;
 
     return (len - byte_read);
 }
