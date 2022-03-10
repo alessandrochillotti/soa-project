@@ -12,7 +12,7 @@ typedef struct buffer_element {
 typedef struct dynamic_buffer {
     buffer_element_t* head;     // head pointer to read
     buffer_element_t* tail;     // tail pointer to attach new written block
-    int byte_in_buffer;         // first byte to read
+    int byte_in_buffer;
     struct mutex operation_synchronizer;
     wait_queue_head_t reader_waitqueue;
     wait_queue_head_t writer_waitqueue;
@@ -21,10 +21,8 @@ typedef struct dynamic_buffer {
 /* functions prototypes */
 int init_dynamic_buffer(dynamic_buffer_t *);
 int init_buffer_element(buffer_element_t *, char *, int);
-
 unsigned long write_dynamic_buffer(dynamic_buffer_t *, char *, int);
 unsigned long read_dynamic_buffer(dynamic_buffer_t *, char *, int);
-
 void free_element_buffer(buffer_element_t *);
 void free_dynamic_buffer(dynamic_buffer_t *);
 

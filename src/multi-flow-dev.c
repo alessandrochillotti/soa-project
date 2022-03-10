@@ -24,6 +24,7 @@ MODULE_AUTHOR("Alessandro Chillotti");
 #define MODNAME "CHAR DEV"
 #define DEVICE_NAME "multi-flow device"
 
+/* function prototypes */
 static int dev_open(struct inode *, struct file *);
 static int dev_release(struct inode *, struct file *);
 static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
@@ -42,13 +43,13 @@ static int Major;
 
 /* struct to abstract IO object */
 typedef struct object {
-    struct workqueue_struct *workqueue;
+    struct workqueue_struct *workqueue; // the work is in object_t because is only for low priority
     dynamic_buffer_t *buffer[FLOWS];
 } object_t;
 
 /* session struct */
 typedef struct session {
-    unsigned char priority;
+    int priority;
     bool blocking;
     unsigned long timeout;
 } session_t;
@@ -64,7 +65,6 @@ typedef struct packed_work{
 object_t files[MINOR_NUMBER];
 
 /* the actual driver */
-
 static int dev_open(struct inode *inode, struct file *file) {
 
     int minor;
@@ -123,35 +123,37 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
     int ret;
     object_t *object;
     session_t *session;
+    dynamic_buffer_t *buffer;
     char *temp_buffer;
 
     minor = get_minor(filp);
     object = files + minor;
     session = (session_t *)filp->private_data;
+    buffer = object->buffer[session->priority];
 
     printk("%s: somebody called a write on dev with [major,minor] number [%d,%d]\n",MODNAME,get_major(filp),get_minor(filp));
 
-    mutex_lock(&(object->buffer[session->priority]->operation_synchronizer));
+    mutex_lock(&(buffer->operation_synchronizer));
 
-    if(object->buffer[session->priority]->byte_in_buffer == MAX_BYTE_IN_BUFFER) {
+    if(buffer->byte_in_buffer == MAX_BYTE_IN_BUFFER) {
         if (session->blocking && session->timeout != 0) {
-            mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
+            mutex_unlock(&(buffer->operation_synchronizer));
 
-            ret = wait_event_interruptible_timeout(object->buffer[session->priority]->writer_waitqueue, object->buffer[session->priority]->byte_in_buffer < MAX_BYTE_IN_BUFFER, session->timeout*SCALING);
+            ret = wait_event_interruptible_timeout(buffer->writer_waitqueue, object->buffer[session->priority]->byte_in_buffer < MAX_BYTE_IN_BUFFER, session->timeout*SCALING);
 
             if (ret == 0) { // timeout elapsed
                 return 0;
             } else if (ret == 1) { // condition evaluated
-                mutex_lock(&(object->buffer[session->priority]->operation_synchronizer));
+                mutex_lock(&(buffer->operation_synchronizer));
             }
             
         } else {
-            mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
+            mutex_unlock(&(buffer->operation_synchronizer));
             return 0;
         }
     }
 
-    if(len > MAX_BYTE_IN_BUFFER - object->buffer[session->priority]->byte_in_buffer) len = MAX_BYTE_IN_BUFFER - object->buffer[session->priority]->byte_in_buffer;
+    if(len > MAX_BYTE_IN_BUFFER - buffer->byte_in_buffer) len = MAX_BYTE_IN_BUFFER - buffer->byte_in_buffer;
 
     if (session->priority == HIGH_PRIORITY) {
 
@@ -160,9 +162,9 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
         ret = copy_from_user(temp_buffer, buff, len);
 
-        write_dynamic_buffer(object->buffer[HIGH_PRIORITY], temp_buffer, len);
+        write_dynamic_buffer(buffer, temp_buffer, len);
 
-        wake_up(&(object->buffer[HIGH_PRIORITY]->reader_waitqueue));
+        wake_up(&(buffer->reader_waitqueue));
     } else {
         packed_work_t *the_task;
 
@@ -202,41 +204,42 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off) 
     int ret;
     object_t *object;
     session_t *session;
+    dynamic_buffer_t *buffer;
 
     minor = get_minor(filp);
     object = files + minor;
-
     session = (session_t *)filp->private_data;
+    buffer = object->buffer[session->priority];
 
     printk("%s: somebody called a read on dev with [major,minor] number [%d,%d]\n",MODNAME,get_major(filp),get_minor(filp));
 
-    mutex_lock(&(object->buffer[session->priority]->operation_synchronizer));
+    mutex_lock(&(buffer->operation_synchronizer));
 
-    if(object->buffer[session->priority]->byte_in_buffer == 0) {
+    if(buffer->byte_in_buffer == 0) {
         if (session->blocking && session->timeout != 0) {
-            mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
+            mutex_unlock(&(buffer->operation_synchronizer));
 
-            ret = wait_event_interruptible_timeout(object->buffer[session->priority]->reader_waitqueue, object->buffer[session->priority]->byte_in_buffer != 0, session->timeout*SCALING);
+            ret = wait_event_interruptible_timeout(buffer->reader_waitqueue, buffer->byte_in_buffer != 0, session->timeout*SCALING);
 
             if (ret == 0) { // timeout elapsed
                 return 0;
             } else if (ret == 1) { // condition evaluated
-                mutex_lock(&(object->buffer[session->priority]->operation_synchronizer));
+                mutex_lock(&(buffer->operation_synchronizer));
             }
             
         } else {
-            mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
+            mutex_unlock(&(buffer->operation_synchronizer));
             return 0;
         }
     }
 
-    if(len > object->buffer[session->priority]->byte_in_buffer) len = object->buffer[session->priority]->byte_in_buffer;
+    if(len > buffer->byte_in_buffer) len = buffer->byte_in_buffer;
 
-    ret = read_dynamic_buffer(object->buffer[session->priority], buff, len);
+    ret = read_dynamic_buffer(buffer, buff, len);
 
-    wake_up(&(object->buffer[session->priority]->writer_waitqueue));
+    wake_up(&(buffer->writer_waitqueue));
 
-    mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
+    mutex_unlock(&(buffer->operation_synchronizer));
 
     printk("%ld byte are read (parola = %s)", (len-ret), buff);
 
