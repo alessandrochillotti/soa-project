@@ -14,8 +14,7 @@ typedef struct dynamic_buffer {
     buffer_element_t* tail;     // tail pointer to attach new written block
     int byte_in_buffer;
     struct mutex operation_synchronizer;
-    wait_queue_head_t reader_waitqueue;
-    wait_queue_head_t writer_waitqueue;
+    wait_queue_head_t waitqueue;
 } dynamic_buffer_t;
 
 /* functions prototypes */
@@ -35,8 +34,7 @@ int init_dynamic_buffer(dynamic_buffer_t *buffer) {
 
     mutex_init(&(buffer->operation_synchronizer));
 
-    init_waitqueue_head(&(buffer->reader_waitqueue));
-    init_waitqueue_head(&(buffer->writer_waitqueue));
+    init_waitqueue_head(&(buffer->waitqueue));
 
     return 0;
 }
@@ -67,8 +65,6 @@ unsigned long write_dynamic_buffer(dynamic_buffer_t *buffer, char *content, int 
         buffer->tail->next = element_to_write;
         buffer->tail = element_to_write;
     }
-
-    buffer->byte_in_buffer += len;
 
     return len;
 }

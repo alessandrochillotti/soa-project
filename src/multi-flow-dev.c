@@ -112,7 +112,7 @@ void deferred_write(unsigned long data) {
 
     write_dynamic_buffer(object->buffer[LOW_PRIORITY], work->staging_area, work->size);
 
-    wake_up(&(object->buffer[LOW_PRIORITY]->reader_waitqueue));
+    wake_up(&(object->buffer[LOW_PRIORITY]->waitqueue));
 
     kfree(container_of((void*)data,packed_work_t,the_work));
 }
@@ -139,7 +139,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         if (session->blocking && session->timeout != 0) {
             mutex_unlock(&(buffer->operation_synchronizer));
 
-            ret = wait_event_interruptible_timeout(buffer->writer_waitqueue, object->buffer[session->priority]->byte_in_buffer < MAX_BYTE_IN_BUFFER, session->timeout*SCALING);
+            ret = wait_event_interruptible_timeout(buffer->waitqueue, object->buffer[session->priority]->byte_in_buffer < MAX_BYTE_IN_BUFFER, session->timeout*SCALING);
 
             if (ret == 0) { // timeout elapsed
                 return 0;
@@ -164,7 +164,9 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
         write_dynamic_buffer(buffer, temp_buffer, len);
 
-        wake_up(&(buffer->reader_waitqueue));
+        buffer->byte_in_buffer += len;
+
+        wake_up(&(buffer->waitqueue));
     } else {
         packed_work_t *the_task;
 
@@ -187,6 +189,8 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
         __INIT_WORK(&(the_task->the_work),(void*)deferred_write,(unsigned long)(&(the_task->the_work)));
         ret = 0;
+
+        buffer->byte_in_buffer += len;
 
         queue_work(object->workqueue, &(the_task->the_work));
     }
@@ -219,7 +223,7 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off) 
         if (session->blocking && session->timeout != 0) {
             mutex_unlock(&(buffer->operation_synchronizer));
 
-            ret = wait_event_interruptible_timeout(buffer->reader_waitqueue, buffer->byte_in_buffer != 0, session->timeout*SCALING);
+            ret = wait_event_interruptible_timeout(buffer->waitqueue, buffer->byte_in_buffer != 0, session->timeout*SCALING);
 
             if (ret == 0) { // timeout elapsed
                 return 0;
@@ -237,7 +241,7 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off) 
 
     ret = read_dynamic_buffer(buffer, buff, len);
 
-    wake_up(&(buffer->writer_waitqueue));
+    wake_up(&(buffer->waitqueue));
 
     mutex_unlock(&(buffer->operation_synchronizer));
 
