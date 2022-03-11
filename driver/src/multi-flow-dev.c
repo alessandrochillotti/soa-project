@@ -11,55 +11,13 @@
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 #include <linux/version.h>
-
-#include "../lib/parameters.h"
-#include "../lib/my-ioctl.h"
+#include "../lib/defines.h"
 #include "../lib/dynamic-buffer.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Alessandro Chillotti");
 
-#define MODNAME "CHAR DEV"
-#define DEVICE_NAME "multi-flow device"
-
-/* function prototypes */
-static int dev_open(struct inode *, struct file *);
-static int dev_release(struct inode *, struct file *);
-static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
-static ssize_t dev_ioctl(struct file *, unsigned int, unsigned long);
-void deferred_write(unsigned long);
-
 static int Major;
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
-#define get_major(session)	MAJOR(session->f_inode->i_rdev)
-#define get_minor(session)	MINOR(session->f_inode->i_rdev)
-#else
-#define get_major(session)	MAJOR(session->f_dentry->d_inode->i_rdev)
-#define get_minor(session)	MINOR(session->f_dentry->d_inode->i_rdev)
-#endif
-
-/* struct to abstract IO object */
-typedef struct object {
-        struct workqueue_struct *workqueue;	// the work is in object_t because is only for low priority
-        dynamic_buffer_t *buffer[FLOWS];
-} object_t;
-
-/* session struct */
-typedef struct session {
-        int priority;
-        bool blocking;
-        unsigned long timeout;
-} session_t;
-
-/* delayed work */
-typedef struct packed_work{
-        char* staging_area;		// data to write
-        int size;
-        int minor;
-        struct work_struct the_work;
-} packed_work_t;
-
 object_t files[MINOR_NUMBER];
 
 bool enabled[MINOR_NUMBER] = {[0 ... (MINOR_NUMBER-1)] = true}; 
@@ -133,15 +91,15 @@ void deferred_write(unsigned long data)
 
 static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t *off)
 {
-        int minor;
         int ret;
+        long *current_byte_in_buffer;
+        long *current_thread_in_wait;
         object_t *object;
         session_t *session;
         dynamic_buffer_t *buffer;
         char *temp_buffer;
 
-        minor = get_minor(filp);
-        object = files + minor;
+        object = files + get_minor(filp);
         session = (session_t *)filp->private_data;
         buffer = object->buffer[session->priority];
 
@@ -149,15 +107,18 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
         mutex_lock(&(buffer->operation_synchronizer));
 
-        if(byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] == MAX_BYTE_IN_BUFFER) {
+        current_byte_in_buffer = byte_in_buffer + (session->priority * MINOR_NUMBER) + get_minor(filp);
+        current_thread_in_wait = thread_in_wait + (session->priority * MINOR_NUMBER) + get_minor(filp);
+
+        if(*current_byte_in_buffer == MAX_BYTE_IN_BUFFER) {
                 if (session->blocking && session->timeout != 0) {
                         mutex_unlock(&(buffer->operation_synchronizer));
 
-                        __sync_fetch_and_add(&(thread_in_wait[(session->priority * MINOR_NUMBER) + minor]),1);
+                        (*thread_in_wait)++;
 
-                        ret = wait_event_interruptible_timeout(buffer->waitqueue, byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] < MAX_BYTE_IN_BUFFER, session->timeout*SCALING);
+                        ret = wait_event_interruptible_timeout(buffer->waitqueue, *current_byte_in_buffer < MAX_BYTE_IN_BUFFER, session->timeout*SCALING);
 
-                        __sync_fetch_and_sub(&(thread_in_wait[(session->priority * MINOR_NUMBER) + minor]),1);
+                        (*thread_in_wait)--;
                         
                         // check if timeout elapsed or condition evaluated
                         if (ret == 0)
@@ -170,7 +131,8 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                 }
         }
 
-        if(len > MAX_BYTE_IN_BUFFER - byte_in_buffer[(session->priority * MINOR_NUMBER) + minor]) len = MAX_BYTE_IN_BUFFER - byte_in_buffer[(session->priority * MINOR_NUMBER) + minor];
+        if(len > MAX_BYTE_IN_BUFFER - *current_byte_in_buffer) 
+                len = MAX_BYTE_IN_BUFFER - *current_byte_in_buffer;
 
         if (session->priority == HIGH_PRIORITY) {
                 temp_buffer = kmalloc(len, GFP_KERNEL);
@@ -180,7 +142,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
                 write_dynamic_buffer(buffer, temp_buffer, len);
 
-                byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] += len;
+                *current_byte_in_buffer += len;
 
                 wake_up(&(buffer->waitqueue));
         } else {
@@ -202,13 +164,13 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
                 // Fill struct
                 ret = copy_from_user(the_task->staging_area, buff, len);
-                the_task->minor = minor;
+                the_task->minor = get_minor(filp);
                 the_task->size = len;
 
                 __INIT_WORK(&(the_task->the_work),(void*)deferred_write,(unsigned long)(&(the_task->the_work)));
                 ret = 0;
 
-                byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] += len;
+                *current_byte_in_buffer += len;
 
                 queue_work(object->workqueue, &(the_task->the_work));
         }
@@ -222,30 +184,33 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
 static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
 {
-        int minor;
         int ret;
+        long *current_byte_in_buffer;
+        long *current_thread_in_wait;
         object_t *object;
         session_t *session;
         dynamic_buffer_t *buffer;
 
-        minor = get_minor(filp);
-        object = files + minor;
+        object = files + get_minor(filp);
         session = (session_t *)filp->private_data;
         buffer = object->buffer[session->priority];
-
+        
         printk("%s: somebody called a read on dev with [major,minor] number [%d,%d]\n",MODNAME,get_major(filp),get_minor(filp));
 
         mutex_lock(&(buffer->operation_synchronizer));
 
-        if(byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] == 0) {
+        current_byte_in_buffer = byte_in_buffer + (session->priority * MINOR_NUMBER) + get_minor(filp);
+        current_thread_in_wait = thread_in_wait + (session->priority * MINOR_NUMBER) + get_minor(filp);
+
+        if(*byte_in_buffer == 0) {
                 if (session->blocking && session->timeout != 0) {
                         mutex_unlock(&(buffer->operation_synchronizer));
 
-                        __sync_fetch_and_add(&(thread_in_wait[(session->priority * MINOR_NUMBER) + minor]),1);
+                        (*thread_in_wait)++;
 
-                        ret = wait_event_interruptible_timeout(buffer->waitqueue, byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] != 0, session->timeout*SCALING);
+                        ret = wait_event_interruptible_timeout(buffer->waitqueue, *current_byte_in_buffer != 0, session->timeout*SCALING);
 
-                        __sync_fetch_and_sub(&(thread_in_wait[(session->priority * MINOR_NUMBER) + minor]),1);
+                        (*thread_in_wait)--;
 
                         // check if timeout elapsed or condition evaluated
                         if (ret == 0) 
@@ -258,11 +223,11 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
                 }
         }
 
-        if(len > byte_in_buffer[(session->priority * MINOR_NUMBER) + minor]) len = byte_in_buffer[(session->priority * MINOR_NUMBER) + minor];
+        if(len > *current_byte_in_buffer) len = *current_byte_in_buffer + get_minor(filp);
 
         ret = read_dynamic_buffer(buffer, buff, len);
 
-        byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] -= len;
+        *current_byte_in_buffer -= len;
 
         wake_up(&(buffer->waitqueue));
 

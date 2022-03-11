@@ -2,6 +2,8 @@
 
 #include <stdbool.h>
 
+#define MAX_TMP_SIZE 50
+
 extern struct configuration conf;
 
 extern char *getInput(unsigned int lung, char *stringa, bool hide);
