@@ -1,6 +1,6 @@
 #pragma once
 
-#define MAX_BYTE_IN_BUFFER 10 // 32*4096  // 32 pagine
+#define MAX_BYTE_IN_BUFFER 32*4096  // 32 pagine
 #define MINOR_NUMBER 128
 #define FLOWS 2
 
