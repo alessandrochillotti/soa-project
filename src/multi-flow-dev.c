@@ -41,23 +41,23 @@ static int Major;
 
 /* struct to abstract IO object */
 typedef struct object {
-	struct workqueue_struct *workqueue;	// the work is in object_t because is only for low priority
-	dynamic_buffer_t *buffer[FLOWS];
+        struct workqueue_struct *workqueue;	// the work is in object_t because is only for low priority
+        dynamic_buffer_t *buffer[FLOWS];
 } object_t;
 
 /* session struct */
 typedef struct session {
-	int priority;
-	bool blocking;
-	unsigned long timeout;
+        int priority;
+        bool blocking;
+        unsigned long timeout;
 } session_t;
 
 /* delayed work */
 typedef struct packed_work{
-	char* staging_area;		// data to write
-	int size;
-	int minor;
-	struct work_struct the_work;
+        char* staging_area;		// data to write
+        int size;
+        int minor;
+        struct work_struct the_work;
 } packed_work_t;
 
 object_t files[MINOR_NUMBER];
@@ -73,294 +73,294 @@ module_param_array(thread_in_wait, long, NULL, S_IRUSR | S_IRGRP);
 /* the actual driver */
 static int dev_open(struct inode *inode, struct file *file)
 {
-	int minor;
-	session_t *session;
+        int minor;
+        session_t *session;
 
-	minor = get_minor(file);
+        minor = get_minor(file);
 
-	if (minor >= MINOR_NUMBER){
-		return -ENODEV;
-	}
+        if (minor >= MINOR_NUMBER){
+                return -ENODEV;
+        }
 
-	// check if multi-flow device is enabled for thi minor
-	if (enabled[minor]) {
-		session = kmalloc(sizeof(session_t), GFP_KERNEL);
-		
-		if (session == NULL)
-			return -ENOMEM;
+        // check if multi-flow device is enabled for thi minor
+        if (enabled[minor]) {
+                session = kmalloc(sizeof(session_t), GFP_KERNEL);
+                
+                if (session == NULL)
+                        return -ENOMEM;
 
-		session->priority = HIGH_PRIORITY;
-		session->blocking = true;
-		session->timeout = 10;
+                session->priority = HIGH_PRIORITY;
+                session->blocking = true;
+                session->timeout = 10;
 
-		file->private_data = session;
+                file->private_data = session;
 
-		printk("%s: device file successfully opened for object with minor %d\n", MODNAME, minor);
-	} else {
-		printk("%s: the session can't be opened %d\n", MODNAME, minor);
-	}
+                printk("%s: device file successfully opened for object with minor %d\n", MODNAME, minor);
+        } else {
+                printk("%s: the session can't be opened %d\n", MODNAME, minor);
+        }
 
-	return 0;
+        return 0;
 }
 
 static int dev_release(struct inode *inode, struct file *file)
 {
-	int minor;
+        int minor;
 
-	minor = get_minor(file);
+        minor = get_minor(file);
 
-	kfree(file->private_data);
-	file->private_data = NULL;
+        kfree(file->private_data);
+        file->private_data = NULL;
 
-	printk("%s: device file with minor %d closed\n", MODNAME, minor);    
+        printk("%s: device file with minor %d closed\n", MODNAME, minor);    
 
-	return 0;
+        return 0;
 }
 
 void deferred_write(unsigned long data)
 {
-	packed_work_t *work = container_of((void*)data,packed_work_t,the_work);
-	object_t *object = files + work->minor;
+        packed_work_t *work = container_of((void*)data,packed_work_t,the_work);
+        object_t *object = files + work->minor;
 
-	write_dynamic_buffer(object->buffer[LOW_PRIORITY], work->staging_area, work->size);
+        write_dynamic_buffer(object->buffer[LOW_PRIORITY], work->staging_area, work->size);
 
-	wake_up(&(object->buffer[LOW_PRIORITY]->waitqueue));
+        wake_up(&(object->buffer[LOW_PRIORITY]->waitqueue));
 
-	kfree(container_of((void*)data,packed_work_t,the_work));
+        kfree(container_of((void*)data,packed_work_t,the_work));
 
-	module_put(THIS_MODULE);
+        module_put(THIS_MODULE);
 }
 
 static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t *off)
 {
-	int minor;
-	int ret;
-	object_t *object;
-	session_t *session;
-	dynamic_buffer_t *buffer;
-	char *temp_buffer;
+        int minor;
+        int ret;
+        object_t *object;
+        session_t *session;
+        dynamic_buffer_t *buffer;
+        char *temp_buffer;
 
-	minor = get_minor(filp);
-	object = files + minor;
-	session = (session_t *)filp->private_data;
-	buffer = object->buffer[session->priority];
+        minor = get_minor(filp);
+        object = files + minor;
+        session = (session_t *)filp->private_data;
+        buffer = object->buffer[session->priority];
 
-	printk("%s: somebody called a write on dev with [major,minor] number [%d,%d]\n",MODNAME,get_major(filp),get_minor(filp));
+        printk("%s: somebody called a write on dev with [major,minor] number [%d,%d]\n",MODNAME,get_major(filp),get_minor(filp));
 
-	mutex_lock(&(buffer->operation_synchronizer));
+        mutex_lock(&(buffer->operation_synchronizer));
 
-	if(byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] == MAX_BYTE_IN_BUFFER) {
-		if (session->blocking && session->timeout != 0) {
-			mutex_unlock(&(buffer->operation_synchronizer));
+        if(byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] == MAX_BYTE_IN_BUFFER) {
+                if (session->blocking && session->timeout != 0) {
+                        mutex_unlock(&(buffer->operation_synchronizer));
 
-			__sync_fetch_and_add(&(thread_in_wait[(session->priority * MINOR_NUMBER) + minor]),1);
+                        __sync_fetch_and_add(&(thread_in_wait[(session->priority * MINOR_NUMBER) + minor]),1);
 
-			ret = wait_event_interruptible_timeout(buffer->waitqueue, byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] < MAX_BYTE_IN_BUFFER, session->timeout*SCALING);
+                        ret = wait_event_interruptible_timeout(buffer->waitqueue, byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] < MAX_BYTE_IN_BUFFER, session->timeout*SCALING);
 
-			__sync_fetch_and_sub(&(thread_in_wait[(session->priority * MINOR_NUMBER) + minor]),1);
-			
-			// check if timeout elapsed or condition evaluated
-			if (ret == 0)
-				return 0;
-			else if (ret == 1)
-				mutex_lock(&(buffer->operation_synchronizer));
-		} else {
-			mutex_unlock(&(buffer->operation_synchronizer));
-			return 0;
-		}
-	}
+                        __sync_fetch_and_sub(&(thread_in_wait[(session->priority * MINOR_NUMBER) + minor]),1);
+                        
+                        // check if timeout elapsed or condition evaluated
+                        if (ret == 0)
+                                return 0;
+                        else if (ret == 1)
+                                mutex_lock(&(buffer->operation_synchronizer));
+                } else {
+                        mutex_unlock(&(buffer->operation_synchronizer));
+                        return 0;
+                }
+        }
 
-	if(len > MAX_BYTE_IN_BUFFER - byte_in_buffer[(session->priority * MINOR_NUMBER) + minor]) len = MAX_BYTE_IN_BUFFER - byte_in_buffer[(session->priority * MINOR_NUMBER) + minor];
+        if(len > MAX_BYTE_IN_BUFFER - byte_in_buffer[(session->priority * MINOR_NUMBER) + minor]) len = MAX_BYTE_IN_BUFFER - byte_in_buffer[(session->priority * MINOR_NUMBER) + minor];
 
-	if (session->priority == HIGH_PRIORITY) {
-		temp_buffer = kmalloc(len, GFP_KERNEL);
-		if (temp_buffer == NULL) return -ENOMEM;
+        if (session->priority == HIGH_PRIORITY) {
+                temp_buffer = kmalloc(len, GFP_KERNEL);
+                if (temp_buffer == NULL) return -ENOMEM;
 
-		ret = copy_from_user(temp_buffer, buff, len);
+                ret = copy_from_user(temp_buffer, buff, len);
 
-		write_dynamic_buffer(buffer, temp_buffer, len);
+                write_dynamic_buffer(buffer, temp_buffer, len);
 
-		byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] += len;
+                byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] += len;
 
-		wake_up(&(buffer->waitqueue));
-	} else {
-		packed_work_t *the_task;
+                wake_up(&(buffer->waitqueue));
+        } else {
+                packed_work_t *the_task;
 
-		if(!try_module_get(THIS_MODULE)) return -ENODEV;
+                if(!try_module_get(THIS_MODULE)) return -ENODEV;
 
-		the_task =  kmalloc(sizeof(packed_work_t),GFP_KERNEL);
-		if (the_task == NULL) {
-			printk("%s: work queue buffer allocation failure\n",MODNAME);
-			return -1;
-		}
+                the_task =  kmalloc(sizeof(packed_work_t),GFP_KERNEL);
+                if (the_task == NULL) {
+                        printk("%s: work queue buffer allocation failure\n",MODNAME);
+                        return -1;
+                }
 
-		the_task->staging_area = kmalloc(len, GFP_KERNEL);
-		if (the_task->staging_area == NULL) {
-			printk("%s: staging area allocation failure\n",MODNAME);
-			return -1;
-		}
+                the_task->staging_area = kmalloc(len, GFP_KERNEL);
+                if (the_task->staging_area == NULL) {
+                        printk("%s: staging area allocation failure\n",MODNAME);
+                        return -1;
+                }
 
-		// Fill struct
-		ret = copy_from_user(the_task->staging_area, buff, len);
-		the_task->minor = minor;
-		the_task->size = len;
+                // Fill struct
+                ret = copy_from_user(the_task->staging_area, buff, len);
+                the_task->minor = minor;
+                the_task->size = len;
 
-		__INIT_WORK(&(the_task->the_work),(void*)deferred_write,(unsigned long)(&(the_task->the_work)));
-		ret = 0;
+                __INIT_WORK(&(the_task->the_work),(void*)deferred_write,(unsigned long)(&(the_task->the_work)));
+                ret = 0;
 
-		byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] += len;
+                byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] += len;
 
-		queue_work(object->workqueue, &(the_task->the_work));
-	}
+                queue_work(object->workqueue, &(the_task->the_work));
+        }
 
-	mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
+        mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
 
-	printk("%ld byte are written", (len-ret));
+        printk("%ld byte are written", (len-ret));
 
-	return len-ret;
+        return len-ret;
 }
 
 static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
 {
-	int minor;
-	int ret;
-	object_t *object;
-	session_t *session;
-	dynamic_buffer_t *buffer;
+        int minor;
+        int ret;
+        object_t *object;
+        session_t *session;
+        dynamic_buffer_t *buffer;
 
-	minor = get_minor(filp);
-	object = files + minor;
-	session = (session_t *)filp->private_data;
-	buffer = object->buffer[session->priority];
+        minor = get_minor(filp);
+        object = files + minor;
+        session = (session_t *)filp->private_data;
+        buffer = object->buffer[session->priority];
 
-	printk("%s: somebody called a read on dev with [major,minor] number [%d,%d]\n",MODNAME,get_major(filp),get_minor(filp));
+        printk("%s: somebody called a read on dev with [major,minor] number [%d,%d]\n",MODNAME,get_major(filp),get_minor(filp));
 
-	mutex_lock(&(buffer->operation_synchronizer));
+        mutex_lock(&(buffer->operation_synchronizer));
 
-	if(byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] == 0) {
-		if (session->blocking && session->timeout != 0) {
-			mutex_unlock(&(buffer->operation_synchronizer));
+        if(byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] == 0) {
+                if (session->blocking && session->timeout != 0) {
+                        mutex_unlock(&(buffer->operation_synchronizer));
 
-			__sync_fetch_and_add(&(thread_in_wait[(session->priority * MINOR_NUMBER) + minor]),1);
+                        __sync_fetch_and_add(&(thread_in_wait[(session->priority * MINOR_NUMBER) + minor]),1);
 
-			ret = wait_event_interruptible_timeout(buffer->waitqueue, byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] != 0, session->timeout*SCALING);
+                        ret = wait_event_interruptible_timeout(buffer->waitqueue, byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] != 0, session->timeout*SCALING);
 
-			__sync_fetch_and_sub(&(thread_in_wait[(session->priority * MINOR_NUMBER) + minor]),1);
+                        __sync_fetch_and_sub(&(thread_in_wait[(session->priority * MINOR_NUMBER) + minor]),1);
 
-			// check if timeout elapsed or condition evaluated
-			if (ret == 0) 
-				return 0;
-			else if (ret == 1) 
-				mutex_lock(&(buffer->operation_synchronizer));
-		} else {
-			mutex_unlock(&(buffer->operation_synchronizer));
-			return 0;
-		}
-	}
+                        // check if timeout elapsed or condition evaluated
+                        if (ret == 0) 
+                                return 0;
+                        else if (ret == 1) 
+                                mutex_lock(&(buffer->operation_synchronizer));
+                } else {
+                        mutex_unlock(&(buffer->operation_synchronizer));
+                        return 0;
+                }
+        }
 
-	if(len > byte_in_buffer[(session->priority * MINOR_NUMBER) + minor]) len = byte_in_buffer[(session->priority * MINOR_NUMBER) + minor];
+        if(len > byte_in_buffer[(session->priority * MINOR_NUMBER) + minor]) len = byte_in_buffer[(session->priority * MINOR_NUMBER) + minor];
 
-	ret = read_dynamic_buffer(buffer, buff, len);
+        ret = read_dynamic_buffer(buffer, buff, len);
 
-	byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] -= len;
+        byte_in_buffer[(session->priority * MINOR_NUMBER) + minor] -= len;
 
-	wake_up(&(buffer->waitqueue));
+        wake_up(&(buffer->waitqueue));
 
-	mutex_unlock(&(buffer->operation_synchronizer));
+        mutex_unlock(&(buffer->operation_synchronizer));
 
-	printk("%ld byte are read (parola = %s)", (len-ret), buff);
+        printk("%ld byte are read (parola = %s)", (len-ret), buff);
 
-	return len - ret;
+        return len - ret;
 }
 
 static ssize_t dev_ioctl(struct file *filp, unsigned int command, unsigned long param)
 {
-	session_t *session = (session_t *)filp->private_data;
+        session_t *session = (session_t *)filp->private_data;
 
-	switch (command) {
-	case TO_HIGH_PRIORITY:  
-		session->priority = HIGH_PRIORITY;
+        switch (command) {
+        case TO_HIGH_PRIORITY:  
+                session->priority = HIGH_PRIORITY;
                 break;
         case TO_LOW_PRIORITY:   
-		session->priority = LOW_PRIORITY;
+                session->priority = LOW_PRIORITY;
                 break;
         case BLOCK:	
-		session->blocking = true;
+                session->blocking = true;
                 break;
         case UNBLOCK:	
-		session->blocking = false;
+                session->blocking = false;
                 break;
         case TIMEOUT:	
-		session->blocking = true;
+                session->blocking = true;
                 session->timeout = param;
                 break;
         default:
-		return 0;
-    	}
+                return 0;
+        }
 
-	return 0;
+        return 0;
 }
 
 static struct file_operations fops = {
-	.owner = THIS_MODULE,
-	.write = dev_write,
-	.read = dev_read,
-	.open =  dev_open,
-	.release = dev_release,
-	.unlocked_ioctl = dev_ioctl
+        .owner = THIS_MODULE,
+        .write = dev_write,
+        .read = dev_read,
+        .open =  dev_open,
+        .release = dev_release,
+        .unlocked_ioctl = dev_ioctl
 };
 
 int init_module(void)
 {
-	int i;
+        int i;
 
-	Major = __register_chrdev(0, 0, MINOR_NUMBER, DEVICE_NAME, &fops);
+        Major = __register_chrdev(0, 0, MINOR_NUMBER, DEVICE_NAME, &fops);
 
-	if (Major < 0) {
-		printk("%s: registering device failed\n",MODNAME);
-		return Major;
-	}
+        if (Major < 0) {
+                printk("%s: registering device failed\n",MODNAME);
+                return Major;
+        }
 
-	// setup of structures
-	for (i = 0; i < MINOR_NUMBER; i++) {
-		files[i].workqueue = create_singlethread_workqueue("work-queue-" + i);
+        // setup of structures
+        for (i = 0; i < MINOR_NUMBER; i++) {
+                files[i].workqueue = create_singlethread_workqueue("work-queue-" + i);
 
-		files[i].buffer[LOW_PRIORITY] = kmalloc(sizeof(dynamic_buffer_t), GFP_KERNEL);
-		files[i].buffer[HIGH_PRIORITY] = kmalloc(sizeof(dynamic_buffer_t), GFP_KERNEL);
+                files[i].buffer[LOW_PRIORITY] = kmalloc(sizeof(dynamic_buffer_t), GFP_KERNEL);
+                files[i].buffer[HIGH_PRIORITY] = kmalloc(sizeof(dynamic_buffer_t), GFP_KERNEL);
 
-		if (files[i].buffer[LOW_PRIORITY] == NULL || files[i].buffer[HIGH_PRIORITY] == NULL) break;
+                if (files[i].buffer[LOW_PRIORITY] == NULL || files[i].buffer[HIGH_PRIORITY] == NULL) break;
 
-		if (init_dynamic_buffer(files[i].buffer[LOW_PRIORITY]) == ENOMEM || init_dynamic_buffer(files[i].buffer[HIGH_PRIORITY]) == ENOMEM) break; 
-	}
+                if (init_dynamic_buffer(files[i].buffer[LOW_PRIORITY]) == ENOMEM || init_dynamic_buffer(files[i].buffer[HIGH_PRIORITY]) == ENOMEM) break; 
+        }
 
-	if (i < MINOR_NUMBER) {
-		for (; i > -1; i--) {
-			free_dynamic_buffer(files[i].buffer[LOW_PRIORITY]);
-			free_dynamic_buffer(files[i].buffer[HIGH_PRIORITY]);
-		}
-		return -ENOMEM;
-	}
+        if (i < MINOR_NUMBER) {
+                for (; i > -1; i--) {
+                        free_dynamic_buffer(files[i].buffer[LOW_PRIORITY]);
+                        free_dynamic_buffer(files[i].buffer[HIGH_PRIORITY]);
+                }
+                return -ENOMEM;
+        }
 
-	printk(KERN_INFO "%s: new device registered, it is assigned major number %d\n",MODNAME, Major);
+        printk(KERN_INFO "%s: new device registered, it is assigned major number %d\n",MODNAME, Major);
 
-	return 0;
+        return 0;
 }
 
 void cleanup_module(void)
 {
-	int i;
+        int i;
 
-	// deallocation of structures
-	for (i = 0; i < MINOR_NUMBER; i++) {
-		destroy_workqueue(files[i].workqueue);
+        // deallocation of structures
+        for (i = 0; i < MINOR_NUMBER; i++) {
+                destroy_workqueue(files[i].workqueue);
 
-		free_dynamic_buffer(files[i].buffer[LOW_PRIORITY]);
-		free_dynamic_buffer(files[i].buffer[HIGH_PRIORITY]);
-	}
+                free_dynamic_buffer(files[i].buffer[LOW_PRIORITY]);
+                free_dynamic_buffer(files[i].buffer[HIGH_PRIORITY]);
+        }
 
-	unregister_chrdev(Major, DEVICE_NAME);
+        unregister_chrdev(Major, DEVICE_NAME);
 
-	printk(KERN_INFO "%s: new device unregistered, it was assigned major number %d\n",MODNAME, Major);
+        printk(KERN_INFO "%s: new device unregistered, it was assigned major number %d\n",MODNAME, Major);
 
-	return;
+return;
 }
