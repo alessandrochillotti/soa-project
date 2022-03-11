@@ -83,7 +83,7 @@ int main(int argc, char** argv)
                         printf("Inserisci il valoro del timeout: ");
                         do {
                         scanf("%ld", &timeout);
-                        } while (timeout > 0);
+                        } while (timeout < 1);
                         IOCTL_TIMEOUT(fd, timeout);
                         break;
                 case '6':

@@ -49,7 +49,7 @@ static int dev_open(struct inode *inode, struct file *file)
 
                 session->priority = HIGH_PRIORITY;
                 session->blocking = true;
-                session->timeout = 10;
+                session->timeout = MAX_SECONDS;
 
                 file->private_data = session;
 
@@ -116,7 +116,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
                         (*thread_in_wait)++;
 
-                        ret = wait_event_interruptible_timeout(buffer->waitqueue, *current_byte_in_buffer < MAX_BYTE_IN_BUFFER, session->timeout*SCALING);
+                        ret = wait_event_interruptible_timeout(buffer->waitqueue, *current_byte_in_buffer < MAX_BYTE_IN_BUFFER, session->timeout*CONFIG_HZ);
 
                         (*thread_in_wait)--;
                         
@@ -162,7 +162,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                         return -1;
                 }
 
-                // Fill struct
+                // fill struct
                 ret = copy_from_user(the_task->staging_area, buff, len);
                 the_task->minor = get_minor(filp);
                 the_task->size = len;
@@ -202,13 +202,13 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
         current_byte_in_buffer = byte_in_buffer + (session->priority * MINOR_NUMBER) + get_minor(filp);
         current_thread_in_wait = thread_in_wait + (session->priority * MINOR_NUMBER) + get_minor(filp);
 
-        if(*byte_in_buffer == 0) {
+        if(*current_byte_in_buffer == 0) {
                 if (session->blocking && session->timeout != 0) {
                         mutex_unlock(&(buffer->operation_synchronizer));
 
                         (*thread_in_wait)++;
 
-                        ret = wait_event_interruptible_timeout(buffer->waitqueue, *current_byte_in_buffer != 0, session->timeout*SCALING);
+                        ret = wait_event_interruptible_timeout(buffer->waitqueue, *current_byte_in_buffer != 0, session->timeout*CONFIG_HZ);
 
                         (*thread_in_wait)--;
 
@@ -257,7 +257,7 @@ static ssize_t dev_ioctl(struct file *filp, unsigned int command, unsigned long 
                 break;
         case TIMEOUT:	
                 session->blocking = true;
-                session->timeout = param;
+                session->timeout = get_seconds(param);
                 break;
         default:
                 return 0;

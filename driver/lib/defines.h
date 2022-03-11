@@ -9,20 +9,22 @@
 #define LOW_PRIORITY 0
 #define HIGH_PRIORITY 1
 
-#define SCALING 1000
-
 /* module defines */
 #define MODNAME "CHAR DEV"
 #define DEVICE_NAME "multi-flow device"
 
 /* indexes fot ioctl */
-#define TO_HIGH_PRIORITY    1
-#define TO_LOW_PRIORITY     2
-#define BLOCK               3
-#define UNBLOCK             4
-#define TIMEOUT             5
+#define TO_HIGH_PRIORITY        1
+#define TO_LOW_PRIORITY         2
+#define BLOCK                   3
+#define UNBLOCK                 4
+#define TIMEOUT                 5
 
-/* macro defines */
+#define MAX_SECONDS             16777215        // 2^(32) = 4294967296 -> 16777215 * 250 < 4294967296 (no overflow)
+
+/* macro */
+#define get_seconds(sec)        sec&MAX_SECONDS
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
 #define get_major(session)      MAJOR(session->f_inode->i_rdev)
 #define get_minor(session)      MINOR(session->f_inode->i_rdev)
