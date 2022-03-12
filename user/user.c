@@ -1,3 +1,32 @@
+Skip to content
+Search or jump to…
+Pull requests
+Issues
+Marketplace
+Explore
+ 
+@alessandrochillotti 
+alessandrochillotti
+/
+soa-project
+Private
+Code
+Issues
+2
+Pull requests
+Actions
+Projects
+Security
+Insights
+Settings
+soa-project/user/user.c
+@alessandrochillotti
+alessandrochillotti #16
+Latest commit af1e686 17 hours ago
+ History
+ 1 contributor
+109 lines (93 sloc)  3.17 KB
+  
 #include <unistd.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -68,23 +97,23 @@ int main(int argc, char** argv)
 
                 switch(op) {
                 case '1':
-                        IOCTL_HIGH_PRIORITY(fd);
+                        turn_to_high_priority(fd);
                         break;
                 case '2':
-                        IOCTL_LOW_PRIORITY(fd);
+                        turn_to_low_priority(fd);
                         break;
                 case '3':
-                        IOCTL_BLOCK(fd);
+                        set_blocking_operations(fd);
                         break;
                 case '4':
-                        IOCTL_UNBLOCK(fd);
+                        set_unblocking_operations(fd);
                         break;
                 case '5':
                         printf("Inserisci il valoro del timeout: ");
                         do {
                         scanf("%ld", &timeout);
                         } while (timeout < 1);
-                        IOCTL_TIMEOUT(fd, timeout);
+                        set_timeout(fd, timeout);
                         break;
                 case '6':
                         printf("Inserisci testo da scrivere: ");

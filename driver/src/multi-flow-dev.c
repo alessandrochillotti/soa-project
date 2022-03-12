@@ -103,7 +103,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         session = (session_t *)filp->private_data;
         buffer = object->buffer[session->priority];
 
-        printk("%s: somebody called a write on dev with [major,minor] number [%d,%d]\n",MODNAME,get_major(filp),get_minor(filp));
+        printk("%s: somebody called a write on dev with [major,minor] number [%d,%d]\n", MODNAME, get_major(filp), get_minor(filp));
 
         mutex_lock(&(buffer->operation_synchronizer));
 
@@ -194,6 +194,9 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
         buffer = object->buffer[session->priority];
         
         printk("%s: somebody called a read on dev with [major,minor] number [%d,%d]\n",MODNAME,get_major(filp),get_minor(filp));
+
+        if (len == 0)
+                return 0;
 
         mutex_lock(&(buffer->operation_synchronizer));
 

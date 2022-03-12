@@ -1,8 +1,8 @@
 #pragma once
 
 /* ioctl commands */
-#define IOCTL_HIGH_PRIORITY(fd)     (ioctl(fd, 1))
-#define IOCTL_LOW_PRIORITY(fd)      (ioctl(fd, 2))
-#define IOCTL_BLOCK(fd)             (ioctl(fd, 3))
-#define IOCTL_UNBLOCK(fd)           (ioctl(fd, 4))
-#define IOCTL_TIMEOUT(fd, value)    (ioctl(fd, 5, value))
+#define turn_to_high_priority(fd)       (ioctl(fd, 1))
+#define turn_to_low_priority(fd)        (ioctl(fd, 2))
+#define set_blocking_operations(fd)     (ioctl(fd, 3))
+#define set_unblocking_operations(fd)   (ioctl(fd, 4))
+#define set_timeout(fd, value)          (ioctl(fd, 5, value))
