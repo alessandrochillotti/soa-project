@@ -24,7 +24,7 @@
 #define MAX_SECONDS             16777215        // 2^(32) = 4294967296 -> 16777215 * 250 < 4294967296 (no overflow)
 
 /* macro */
-#define get_seconds(sec)        (sec&MAX_SECONDS)|MIN_SECONDS
+#define get_seconds(sec)        (sec&MAX_SECONDS)
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
 #define get_major(session)      MAJOR(session->f_inode->i_rdev)

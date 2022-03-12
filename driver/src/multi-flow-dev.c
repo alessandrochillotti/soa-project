@@ -255,6 +255,9 @@ static ssize_t dev_ioctl(struct file *filp, unsigned int command, unsigned long 
         case TIMEOUT:	
                 session->blocking = true;
                 session->timeout = get_seconds(param);
+                if (session->timeout == 0)
+                        session->timeout = MIN_SECONDS;
+                printk("session->timeout = %ld", session->timeout);
                 break;
         default:
                 return 0;
