@@ -110,25 +110,23 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         current_byte_in_buffer = byte_in_buffer + (session->priority * MINOR_NUMBER) + get_minor(filp);
         current_thread_in_wait = thread_in_wait + (session->priority * MINOR_NUMBER) + get_minor(filp);
 
-        if(*current_byte_in_buffer == MAX_BYTE_IN_BUFFER) {
-                if (session->blocking && session->timeout != 0) {
-                        mutex_unlock(&(buffer->operation_synchronizer));
+        if(*current_byte_in_buffer == MAX_BYTE_IN_BUFFER && session->blocking) {
+                mutex_unlock(&(buffer->operation_synchronizer));
 
-                        (*thread_in_wait)++;
+                __sync_fetch_and_add(thread_in_wait, 1);
 
-                        ret = wait_event_interruptible_timeout(buffer->waitqueue, *current_byte_in_buffer < MAX_BYTE_IN_BUFFER, session->timeout*CONFIG_HZ);
+                ret = wait_event_interruptible_timeout(buffer->waitqueue, *current_byte_in_buffer < MAX_BYTE_IN_BUFFER, session->timeout*CONFIG_HZ);
 
-                        (*thread_in_wait)--;
-                        
-                        // check if timeout elapsed or condition evaluated
-                        if (ret == 0)
-                                return 0;
-                        else if (ret == 1)
-                                mutex_lock(&(buffer->operation_synchronizer));
-                } else {
-                        mutex_unlock(&(buffer->operation_synchronizer));
+                __sync_fetch_and_sub(thread_in_wait, 1);
+                
+                // check if timeout elapsed or condition evaluated
+                if (ret == 0)
                         return 0;
-                }
+                else if (ret == 1)
+                        mutex_lock(&(buffer->operation_synchronizer));
+        } else if (*current_byte_in_buffer == MAX_BYTE_IN_BUFFER) {
+                mutex_unlock(&(buffer->operation_synchronizer));
+                return 0;
         }
 
         if(len > MAX_BYTE_IN_BUFFER - *current_byte_in_buffer) 
@@ -202,28 +200,27 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
         current_byte_in_buffer = byte_in_buffer + (session->priority * MINOR_NUMBER) + get_minor(filp);
         current_thread_in_wait = thread_in_wait + (session->priority * MINOR_NUMBER) + get_minor(filp);
 
-        if(*current_byte_in_buffer == 0) {
-                if (session->blocking && session->timeout != 0) {
-                        mutex_unlock(&(buffer->operation_synchronizer));
+        if(*current_byte_in_buffer == 0 && session->blocking) {
+                mutex_unlock(&(buffer->operation_synchronizer));
 
-                        (*thread_in_wait)++;
+                __sync_fetch_and_add(thread_in_wait, 1);
 
-                        ret = wait_event_interruptible_timeout(buffer->waitqueue, *current_byte_in_buffer != 0, session->timeout*CONFIG_HZ);
+                ret = wait_event_interruptible_timeout(buffer->waitqueue, *current_byte_in_buffer != 0, session->timeout*CONFIG_HZ);
 
-                        (*thread_in_wait)--;
+                __sync_fetch_and_sub(thread_in_wait, 1);
 
-                        // check if timeout elapsed or condition evaluated
-                        if (ret == 0) 
-                                return 0;
-                        else if (ret == 1) 
-                                mutex_lock(&(buffer->operation_synchronizer));
-                } else {
-                        mutex_unlock(&(buffer->operation_synchronizer));
+                // check if timeout elapsed or condition evaluated
+                if (ret == 0) 
                         return 0;
-                }
+                else if (ret == 1) 
+                        mutex_lock(&(buffer->operation_synchronizer));
+        } else if (*current_byte_in_buffer == 0) {
+                mutex_unlock(&(buffer->operation_synchronizer));
+                return 0;
         }
-
-        if(len > *current_byte_in_buffer) len = *current_byte_in_buffer + get_minor(filp);
+ 
+        if(len > *current_byte_in_buffer)
+                len = *current_byte_in_buffer;
 
         ret = read_dynamic_buffer(buffer, buff, len);
 
