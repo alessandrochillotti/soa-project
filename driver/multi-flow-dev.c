@@ -63,14 +63,10 @@ static int dev_open(struct inode *inode, struct file *file)
 
 static int dev_release(struct inode *inode, struct file *file)
 {
-        int minor;
-
-        minor = get_minor(file);
-
         kfree(file->private_data);
         file->private_data = NULL;
 
-        printk("%s: device file with minor %d closed\n", MODNAME, minor);    
+        printk("%s: device file with minor %d closed\n", MODNAME, get_minor(file));    
 
         return 0;
 }
@@ -82,11 +78,11 @@ void deferred_write(unsigned long data)
 
         write_dynamic_buffer(object->buffer[LOW_PRIORITY], work->staging_area, work->size);
 
+        printk(KERN_INFO "%s-%d: deferred write completed", MODNAME, work->minor);
+
         wake_up(&(object->buffer[LOW_PRIORITY]->waitqueue));
 
         kfree(container_of((void*)data,packed_work_t,the_work));
-
-        printk(KERN_INFO "%s-%d: deferred write completed", MODNAME, work->minor);
 
         module_put(THIS_MODULE);
 }
@@ -105,7 +101,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         session = (session_t *)filp->private_data;
         buffer = object->buffer[session->priority];
 
-        printk(KERN_INFO "%s-%d: write called by minor\n", MODNAME, get_minor(filp));
+        printk(KERN_INFO "%s-%d: write called\n", MODNAME, get_minor(filp));
 
         mutex_lock(&(buffer->operation_synchronizer));
 
@@ -143,9 +139,9 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
                 write_dynamic_buffer(buffer, temp_buffer, len);
 
-                *current_byte_in_buffer += len;
-
                 printk(KERN_INFO "%s-%d: %ld byte are written\n", MODNAME, get_minor(filp), (len-ret));
+
+                *current_byte_in_buffer += len;
 
                 wake_up(&(buffer->waitqueue));
         } else {
