@@ -41,7 +41,7 @@ int main(int argc, char** argv)
         system(command);
 
         // open device
-        fd = open(path, O_RDWR, O_CREAT);
+        fd = open(path, O_RDWR);
         if (fd == -1) {
                 printf("open error on device %s\n", path);
                 return -1;

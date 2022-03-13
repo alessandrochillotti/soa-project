@@ -53,9 +53,9 @@ static int dev_open(struct inode *inode, struct file *file)
 
                 file->private_data = session;
 
-                printk("%s: device file successfully opened for object with minor %d\n", MODNAME, minor);
+                printk(KERN_INFO "%s-%d: device file successfully opened for object\n", MODNAME, minor);
         } else {
-                printk("%s: the session can't be opened %d\n", MODNAME, minor);
+                printk(KERN_INFO "%s-%d: device file can't be opened\n", MODNAME, minor);
         }
 
         return 0;
@@ -86,7 +86,7 @@ void deferred_write(unsigned long data)
 
         kfree(container_of((void*)data,packed_work_t,the_work));
 
-        printk("deferred write completed");
+        printk(KERN_INFO "%s-%d: deferred write completed", MODNAME, work->minor);
 
         module_put(THIS_MODULE);
 }
@@ -105,7 +105,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         session = (session_t *)filp->private_data;
         buffer = object->buffer[session->priority];
 
-        printk("%s: somebody called a write on dev with [major,minor] number [%d,%d]\n", MODNAME, get_major(filp), get_minor(filp));
+        printk(KERN_INFO "%s-%d: write called by minor\n", MODNAME, get_minor(filp));
 
         mutex_lock(&(buffer->operation_synchronizer));
 
@@ -145,7 +145,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
                 *current_byte_in_buffer += len;
 
-                printk("%ld byte are written", (len-ret));
+                printk(KERN_INFO "%s-%d: %ld byte are written\n", MODNAME, get_minor(filp), (len-ret));
 
                 wake_up(&(buffer->waitqueue));
         } else {
@@ -155,13 +155,13 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
                 the_task =  kmalloc(sizeof(packed_work_t),GFP_KERNEL);
                 if (the_task == NULL) {
-                        printk("%s: work queue buffer allocation failure\n",MODNAME);
+                        printk(KERN_ERR "%s-%d: work queue buffer allocation failure\n",MODNAME,get_minor(filp));
                         return -ENOMEM;
                 }
 
                 the_task->staging_area = kmalloc(len, GFP_KERNEL);
                 if (the_task->staging_area == NULL) {
-                        printk("%s: staging area allocation failure\n",MODNAME);
+                        printk(KERN_ERR "%s-%d: staging area allocation failure\n",MODNAME,get_minor(filp));
                         return -ENOMEM;
                 }
 
@@ -196,7 +196,7 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
         session = (session_t *)filp->private_data;
         buffer = object->buffer[session->priority];
         
-        printk("%s: somebody called a read on dev with [major,minor] number [%d,%d]\n",MODNAME,get_major(filp),get_minor(filp));
+        printk(KERN_INFO "%s-%d: read called\n",MODNAME,get_minor(filp));
 
         if (len == 0)
                 return 0;
@@ -236,7 +236,7 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
 
         mutex_unlock(&(buffer->operation_synchronizer));
 
-        printk("%ld byte are read", (len-ret));
+        printk(KERN_INFO "%s-%d: %ld byte are read\n", MODNAME, get_minor(filp), (len-ret));
 
         return len - ret;
 }
@@ -287,7 +287,7 @@ int init_module(void)
         Major = __register_chrdev(0, 0, MINOR_NUMBER, DEVICE_NAME, &fops);
 
         if (Major < 0) {
-                printk("%s: registering device failed\n",MODNAME);
+                printk(KERN_INFO "%s: registering device failed\n",MODNAME);
                 return Major;
         }
 
