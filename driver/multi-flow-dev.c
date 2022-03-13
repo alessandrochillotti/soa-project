@@ -11,8 +11,8 @@
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 #include <linux/version.h>
-#include "../lib/defines.h"
-#include "../lib/dynamic-buffer.h"
+#include "lib/defines.h"
+#include "lib/dynamic-buffer.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Alessandro Chillotti");

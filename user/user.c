@@ -20,7 +20,7 @@ int main(int argc, char** argv)
         unsigned long timeout;
 
         int num;
-        int outcome_ioctl;
+        int outcome_ioctl = 0;
         char op = '0';
 
         char options[8] = {'1', '2', '3', '4', '5', '6', '7', '8'};
@@ -41,7 +41,7 @@ int main(int argc, char** argv)
         system(command);
 
         // open device
-        fd = open(path, O_RDWR);
+        fd = open(path, O_RDWR, O_CREAT);
         if (fd == -1) {
                 printf("open error on device %s\n", path);
                 return -1;
