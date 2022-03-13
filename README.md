@@ -25,7 +25,7 @@ dove:
 - `minor` è l'identificativo del device file e può variare da 0 a 127.
 
 ### Avvio applicazione user
-All'interno della directory `user` si può utilizzare `make` per ottenere il file eseguibile ed, una volta prodotto, si può avviare l'applicazione con il seguente comando.
+All'interno della directory `user` si può utilizzare `make` per ottenere il file eseguibile e, una volta prodotto, si può avviare l'applicazione con il seguente comando.
 ```
 sudo ./user path major minor
 ```
