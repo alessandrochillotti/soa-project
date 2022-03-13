@@ -151,13 +151,13 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                 the_task =  kmalloc(sizeof(packed_work_t),GFP_KERNEL);
                 if (the_task == NULL) {
                         printk("%s: work queue buffer allocation failure\n",MODNAME);
-                        return -1;
+                        return -ENOMEM;
                 }
 
                 the_task->staging_area = kmalloc(len, GFP_KERNEL);
                 if (the_task->staging_area == NULL) {
                         printk("%s: staging area allocation failure\n",MODNAME);
-                        return -1;
+                        return -ENOMEM;
                 }
 
                 // fill struct
@@ -227,13 +227,13 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
 
         ret = read_dynamic_buffer(buffer, buff, len);
 
-        *current_byte_in_buffer -= len;
+        *current_byte_in_buffer -= len - ret;
 
         wake_up(&(buffer->waitqueue));
 
         mutex_unlock(&(buffer->operation_synchronizer));
 
-        printk("%ld byte are read (parola = %s)", (len-ret), buff);
+        printk("%ld byte are read", (len-ret));
 
         return len - ret;
 }
@@ -260,7 +260,6 @@ static ssize_t dev_ioctl(struct file *filp, unsigned int command, unsigned long 
                 session->timeout = get_seconds(param);
                 if (session->timeout == 0)
                         session->timeout = MIN_SECONDS;
-                printk("session->timeout = %ld", session->timeout);
                 break;
         default:
                 return 0;

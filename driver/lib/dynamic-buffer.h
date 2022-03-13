@@ -67,39 +67,46 @@ unsigned long write_dynamic_buffer(dynamic_buffer_t *buffer, char *content, int 
         return len;
 }
 
-unsigned long read_dynamic_buffer(dynamic_buffer_t *buffer, char *read_content, int len)
+unsigned long read_dynamic_buffer(dynamic_buffer_t *buffer, char __user *read_content, int len)
 {
         buffer_element_t *cur;
         buffer_element_t *old;
 
         int byte_read;
+        int ret;
 
         byte_read = 0;
         cur = buffer->head;
 
         // read whole blocks
         while (cur != NULL && (len - byte_read > cur->size - cur->byte_read)) {
-                memcpy(read_content + byte_read, cur->content + cur->byte_read, cur->size - cur->byte_read);
+                ret = copy_to_user(read_content + byte_read, cur->content + cur->byte_read, cur->size - cur->byte_read);
 
-                byte_read += cur->size - cur->byte_read;
+                byte_read += cur->size - cur->byte_read - ret;
 
-                old = cur;
-                cur = cur->next;
+                if (ret == 0) {
+                        old = cur;
+                        cur = cur->next;
 
-                buffer->head = cur;
-                if (buffer->head == buffer->tail) buffer->tail = NULL;
-                free_element_buffer(old);
+                        buffer->head = cur;
+                        if (buffer->head == buffer->tail) buffer->tail = NULL;
+                        free_element_buffer(old);
+                } else {
+                        cur->byte_read += cur->size - cur->byte_read - ret;
+
+                        return len - byte_read;
+                }
         }
 
         // check if i must read in this condition: byte_to_read < cur->size
         if (cur != NULL) {
-                memcpy(read_content + byte_read, cur->content + cur->byte_read, len - byte_read);
+                ret = copy_to_user(read_content + byte_read, cur->content + cur->byte_read, len - byte_read);
 
-                cur->byte_read += len - byte_read;
-                byte_read += len - byte_read;
+                cur->byte_read += len - byte_read - ret;
+                byte_read += len - byte_read - ret;
         }
 
-        return (len - byte_read);
+        return len - byte_read;
 }
 
 void free_element_buffer(buffer_element_t *element)

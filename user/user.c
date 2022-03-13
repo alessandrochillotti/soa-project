@@ -1,32 +1,3 @@
-Skip to content
-Search or jump to…
-Pull requests
-Issues
-Marketplace
-Explore
- 
-@alessandrochillotti 
-alessandrochillotti
-/
-soa-project
-Private
-Code
-Issues
-2
-Pull requests
-Actions
-Projects
-Security
-Insights
-Settings
-soa-project/user/user.c
-@alessandrochillotti
-alessandrochillotti #16
-Latest commit af1e686 17 hours ago
- History
- 1 contributor
-109 lines (93 sloc)  3.17 KB
-  
 #include <unistd.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -109,7 +80,7 @@ int main(int argc, char** argv)
                         set_unblocking_operations(fd);
                         break;
                 case '5':
-                        printf("Inserisci il valoro del timeout: ");
+                        printf("Inserisci il valore del timeout: ");
                         do {
                         scanf("%ld", &timeout);
                         } while (timeout < 1);
