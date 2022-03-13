@@ -5,6 +5,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <sys/ioctl.h>
+#include <errno.h>
 
 #include "lib/defines.h"
 #include "lib/user.h"
@@ -19,6 +20,7 @@ int main(int argc, char** argv)
         unsigned long timeout;
 
         int num;
+        int outcome_ioctl;
         char op = '0';
 
         char options[8] = {'1', '2', '3', '4', '5', '6', '7', '8'};
@@ -27,7 +29,7 @@ int main(int argc, char** argv)
         char tmp[MAX_TMP_SIZE];
 
         if (argc < 4) {
-                printf("usage: pathname major minors\n");
+                printf("usage: pathname major minor\n");
                 return -1;
         }
 
@@ -52,6 +54,8 @@ int main(int argc, char** argv)
                         printf("Scritti primi %d byte di %s\n\n", ret, tmp);
                 } else if (op == '7') {
                         printf("Lettura: %s (%d byte)\n\n", tmp, ret);
+                } else if (outcome_ioctl != 0) {
+                        printf("Problema nella richiesta ioctl\n\n");
                 }
                 memset(tmp, 0, MAX_TMP_SIZE);
 
@@ -68,23 +72,23 @@ int main(int argc, char** argv)
 
                 switch(op) {
                 case '1':
-                        turn_to_high_priority(fd);
+                        outcome_ioctl = turn_to_high_priority(fd);
                         break;
                 case '2':
-                        turn_to_low_priority(fd);
+                        outcome_ioctl = turn_to_low_priority(fd);
                         break;
                 case '3':
-                        set_blocking_operations(fd);
+                        outcome_ioctl = set_blocking_operations(fd);
                         break;
                 case '4':
-                        set_unblocking_operations(fd);
+                        outcome_ioctl = set_unblocking_operations(fd);
                         break;
                 case '5':
                         printf("Inserisci il valore del timeout: ");
                         do {
                         scanf("%ld", &timeout);
                         } while (timeout < 1);
-                        set_timeout(fd, timeout);
+                        outcome_ioctl = set_timeout(fd, timeout);
                         break;
                 case '6':
                         printf("Inserisci testo da scrivere: ");

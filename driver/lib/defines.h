@@ -2,7 +2,7 @@
 
 #include "dynamic-buffer.h"
 
-#define MAX_BYTE_IN_BUFFER 32*4096  // 32 pagine
+#define MAX_BYTE_IN_BUFFER 32*4096      // 32 pagine
 #define MINOR_NUMBER 128
 #define FLOWS 2
 
@@ -14,11 +14,11 @@
 #define DEVICE_NAME "multi-flow device"
 
 /* indexes fot ioctl */
-#define TO_HIGH_PRIORITY        1
-#define TO_LOW_PRIORITY         2
-#define BLOCK                   3
-#define UNBLOCK                 4
-#define TIMEOUT                 5
+#define TO_HIGH_PRIORITY        3
+#define TO_LOW_PRIORITY         4
+#define BLOCK                   5
+#define UNBLOCK                 6
+#define TIMEOUT                 7
 
 #define MIN_SECONDS             1
 #define MAX_SECONDS             16777215        // 2^(32) = 4294967296 -> 16777215 * 250 < 4294967296 (no overflow)

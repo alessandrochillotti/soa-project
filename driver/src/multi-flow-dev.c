@@ -86,6 +86,8 @@ void deferred_write(unsigned long data)
 
         kfree(container_of((void*)data,packed_work_t,the_work));
 
+        printk("deferred write completed");
+
         module_put(THIS_MODULE);
 }
 
@@ -134,13 +136,16 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
         if (session->priority == HIGH_PRIORITY) {
                 temp_buffer = kmalloc(len, GFP_KERNEL);
-                if (temp_buffer == NULL) return -ENOMEM;
+                if (temp_buffer == NULL) 
+                        return -ENOMEM;
 
                 ret = copy_from_user(temp_buffer, buff, len);
 
                 write_dynamic_buffer(buffer, temp_buffer, len);
 
                 *current_byte_in_buffer += len;
+
+                printk("%ld byte are written", (len-ret));
 
                 wake_up(&(buffer->waitqueue));
         } else {
@@ -174,8 +179,6 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         }
 
         mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
-
-        printk("%ld byte are written", (len-ret));
 
         return len-ret;
 }
@@ -243,19 +246,19 @@ static ssize_t dev_ioctl(struct file *filp, unsigned int command, unsigned long 
         session_t *session = (session_t *)filp->private_data;
 
         switch (command) {
-        case TO_HIGH_PRIORITY:  
+        case TO_HIGH_PRIORITY:
                 session->priority = HIGH_PRIORITY;
                 break;
-        case TO_LOW_PRIORITY:   
+        case TO_LOW_PRIORITY:
                 session->priority = LOW_PRIORITY;
                 break;
-        case BLOCK:	
+        case BLOCK:
                 session->blocking = true;
                 break;
-        case UNBLOCK:	
+        case UNBLOCK:
                 session->blocking = false;
                 break;
-        case TIMEOUT:	
+        case TIMEOUT:
                 session->blocking = true;
                 session->timeout = get_seconds(param);
                 if (session->timeout == 0)
