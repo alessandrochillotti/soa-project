@@ -1,4 +1,6 @@
 all:
 	gcc user.c inout.c -lpthread -o user
 clean:
-	rm user
+	rm -f user test
+test:
+	gcc test.c -lpthread -o test
