@@ -13,12 +13,11 @@ then
 	exit 1
 fi
 
- if [ $2 -lt 0 -o $2 -gt 1 ]
- then
- 	echo "The priority must be 0 (LOW) or 1 (HIGH)."
- 	exit 1
- fi
-
+if [ $2 -lt 0 -o $2 -gt 1 ]
+then
+	echo "The priority must be 0 (LOW) or 1 (HIGH)."
+	exit 1
+fi
 
 index=$(($2*128+$1+1))
 
