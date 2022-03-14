@@ -37,8 +37,10 @@ int main(int argc, char** argv)
         major = strtol(argv[2],NULL,10);
         minor = strtol(argv[3],NULL,10);
 
-        sprintf(command,"mknod %s c %d %d\n",path,major,minor);
-        system(command);
+        if(access(path, F_OK) != 0) {
+                sprintf(command,"mknod %s c %d %d\n",path,major,minor);
+                system(command);  
+        } 
 
         // open device
         fd = open(path, O_RDWR);
@@ -107,7 +109,6 @@ int main(int argc, char** argv)
                         printf("operazione non disponibile");
                 }
         }
-
 
         return 0;
 }

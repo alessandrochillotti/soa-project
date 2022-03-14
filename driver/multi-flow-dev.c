@@ -43,7 +43,6 @@ static int dev_open(struct inode *inode, struct file *file)
         // check if multi-flow device is enabled for thi minor
         if (enabled[minor]) {
                 session = kmalloc(sizeof(session_t), GFP_KERNEL);
-                
                 if (session == NULL)
                         return -ENOMEM;
 
@@ -56,6 +55,7 @@ static int dev_open(struct inode *inode, struct file *file)
                 printk(KERN_INFO "%s-%d: device file successfully opened for object\n", MODNAME, minor);
         } else {
                 printk(KERN_INFO "%s-%d: device file can't be opened\n", MODNAME, minor);
+                return -1;
         }
 
         return 0;
