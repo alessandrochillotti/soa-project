@@ -1,0 +1,176 @@
+\documentclass[oneside]{article}
+
+% Package necessari
+\usepackage[a4paper,top=2cm,bottom=2cm,left=1.5cm,right=1.5cm]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[italian]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage[table, dvipsnames]{xcolor}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{cancel}
+\usepackage[ruled,vlined,linesnumbered]{algorithm2e}
+\usepackage[noend]{algpseudocode}
+\usepackage[font={small,sl}]{caption}
+\usepackage[font={small,sl}]{subcaption}
+\usepackage{tocbibind}
+\usepackage{accents}
+\usepackage[section]{placeins}
+\usepackage{multicol}
+\usepackage{mathtools}
+\usepackage{dsfont}
+\usepackage{color}
+\usepackage{titlesec}
+
+\makeatletter
+\AtBeginDocument{%
+  \expandafter\renewcommand\expandafter\subsection\expandafter{%
+    \expandafter\@fb@secFB\subsection
+  }%
+}
+\makeatother
+
+% Colori per i listing
+\definecolor{code_red}{rgb}{0.6,0,0} % strings
+\definecolor{code_green}{rgb}{0.25,0.5,0.35} % comments
+\definecolor{code_purple}{rgb}{0.5,0,0.35} % keywords
+\definecolor{code_background}{rgb}{0.95,0.95,0.92} % background
+\definecolor{verify_blue}{HTML}{12ACF2}
+\definecolor{verify_red}{HTML}{F2122C}
+\definecolor{verify_yellow}{HTML}{FFBB00}
+
+% Stile del codice standard (C)
+\lstset{
+	language=C, 
+	backgroundcolor=\color{code_background},
+	frame=single,
+	basicstyle=\ttfamily\small,
+	keywordstyle=\color{code_purple}\bfseries\small,
+	stringstyle=\color{code_red}\small,
+	commentstyle=\color{code_green}\small,
+	numbers=left,
+	numberstyle=\small\color{gray},
+	numbersep=5pt,
+	tabsize=4,
+	showtabs=false,
+	showspaces=false,
+	showstringspaces=false,
+	escapechar=|, 
+	captionpos=b,
+	breaklines=true,
+}
+
+% Aggiunto paragraph come subsubsubsection
+\setcounter{secnumdepth}{3}
+\titleformat{\paragraph}
+{\normalfont\normalsize\bfseries}{\theparagraph}{1em}{}
+\titlespacing*{\paragraph}
+{0pt}{3.25ex plus 1ex minus .2ex}{1.5ex plus .2ex}
+
+% Impostazione delle lunghezze di alcuni elementi del documento
+\setlength{\parskip}{1em}
+\setlength{\parindent}{0em}
+\setlength{\arrayrulewidth}{0.1em}
+
+% Informazioni per la title page
+\title{Progetto di Sistemi Operativi Avanzati}
+
+\date{A.A. 2021/2022}
+
+\author{A. Chillotti\thanks{\texttt{\href{mailto:alessandro.chillotti@outlook.it}{alessandro.chillotti@outlook.it}}}}
+
+% Impostazione del package hyperref
+\hypersetup{
+    colorlinks=true,
+    linktocpage=true,
+    linkcolor=blue,
+    urlcolor=blue,
+    pdftitle={Advanced Operating Systems and System Security},
+    pdfauthor={A. Chillotti},
+}
+ 
+% Stile del codice standard (C)
+\lstset{
+	language=C, 
+	backgroundcolor=\color{code_background},
+	frame=single,
+	basicstyle=\ttfamily\small,
+	keywordstyle=\color{code_purple}\bfseries\small,
+	stringstyle=\color{code_red}\small,
+	commentstyle=\color{code_green}\small,
+	numbers=left,
+	numberstyle=\small\color{gray},
+	numbersep=5pt,
+	tabsize=4,
+	showtabs=false,
+	showspaces=false,
+	showstringspaces=false,
+	escapechar=|, 
+	captionpos=b,
+	breaklines=true,
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\small A.Chillotti}
+\rhead{\small Advanced Operating Systems and System Security}
+\cfoot{\thepage}
+%\cfoot{Pagina \thepage}
+\SetNlSty{bfseries}{\color{black}}{}
+
+% Spaziatura tabelle
+\renewcommand{\arraystretch}{1.5}
+
+\graphicspath{ {./figs/} }
+% Definizione del colore delle tabelle
+\newcommand{\tablecolors}[1][2]{\rowcolors{#1}{yellow!50}{yellow!25}}
+
+% Definizione dello stile da usare per la P di probabilità (grassetto in math-mode)
+\newcommand{\pr}{\mathbf{P}}
+
+% Forzatura del displaystyle in math-mode
+\everymath\expandafter{\the\everymath\displaystyle}
+
+%\newcommand{\scaption}[1]{\small{\caption{#1}}}
+\renewcommand{\lstlistingname}{Snippet}
+
+% Definizione di comandi per operatori matematici
+\newcommand{\xor}{\oplus}
+
+% Definizione osservazione
+\newcommand{\obs}{\underline{Osservazione}}
+
+% Definizione di \texttt{•} per matematica
+\newcommand{\matht}[1]{\text{\texttt{#1}}}
+
+% Definizione di domande e risposta
+\newcommand{\question}[2]{
+\textit{#1}\\
+#2
+}
+
+\begin{document}
+\maketitle
+
+\section{Traccia del progetto}
+Questa specifica è legata ad un driver Linux che implementa flussi di dati a priorità bassa e alta. Attraverso una sessione aperta al devide file, un thread può leggere/scrivere segmenti dati. La consegna dei dati segue una policy First-in-First-out lungo ciascuno dei due diversi flussi di dati (bassa e alta priorità). Dopo le operazioni di lettura, i dati devono scomparire dal flusso. Inoltre, il flusso dati di alta priorità deve offrire operazioni di scrittura sincrone, mentre il flusso dati di bassa priorità deve offrire una esecuzione asincrona (basata su delayed work) delle operazioni di scrittura, pur mantenendo l'interfaccia in grado di notificare in modo sincrono l'esito. Le operazioni di lettura sono tutte eseguite sincronamente. Il device driver supporta 128 device corrispondenti alla stessa quantità di minor number. Il device driver deve implementare il supporto per il servizio \texttt{ioctl(..)} in modo tale da gestire la sessione di I/O come segue:
+\begin{itemize}
+\item setup del livello di priorità (alto o basso) per le operazioni;
+\item operazioni di lettura e scrittura bloccanti vs operazioni di lettura e scrittura non bloccanti;
+\item setup del timeout che reluga il risveglio delle operazioni bloccanti.
+\end{itemize}
+Alcuni parametri e funzioni del modulo Linux dovrebbero essere in grado di abilitare o disabilitare il file del dispositivo, in termini di specifico minor number. Se è disabilitato, un tentativo di apertura della sessione deve fallire (ma le sessioni già aperte devono essere ancora gestire). Ulteriori parametri esposti via VFS devono fornire un'immagine dello stato corrente del device in accordo alle seguenti informazioni:
+\begin{itemize}
+\item abilitiato o disabilitato;
+\item numero di byte correntemente presente nei due flussi (alta e bassa priorità);
+\item numero di thread correntemente in attesa di dati lungo i due flussi (alta e bassa priorità).
+\end{itemize}
+
+\section{Relazione del progetto svolto}
+
+\end{document}
