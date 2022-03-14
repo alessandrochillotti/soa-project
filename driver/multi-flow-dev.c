@@ -328,5 +328,5 @@ void cleanup_module(void)
 
         printk(KERN_INFO "%s: new device unregistered, it was assigned major number %d\n",MODNAME, Major);
 
-return;
+        return;
 }
