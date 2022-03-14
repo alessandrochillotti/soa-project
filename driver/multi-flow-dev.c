@@ -40,7 +40,7 @@ static int dev_open(struct inode *inode, struct file *file)
                 return -ENODEV;
         }
 
-        // check if multi-flow device is enabled for thi minor
+        // check if multi-flow device is enabled for this minor
         if (enabled[minor]) {
                 session = kmalloc(sizeof(session_t), GFP_KERNEL);
                 if (session == NULL)
