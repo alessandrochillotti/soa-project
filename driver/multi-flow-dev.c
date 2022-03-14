@@ -111,11 +111,11 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         if(*current_byte_in_buffer == MAX_BYTE_IN_BUFFER && session->blocking) {
                 mutex_unlock(&(buffer->operation_synchronizer));
 
-                __sync_fetch_and_add(thread_in_wait, 1);
+                __sync_fetch_and_add(current_thread_in_wait, 1);
 
                 ret = wait_event_interruptible_timeout(buffer->waitqueue, *current_byte_in_buffer < MAX_BYTE_IN_BUFFER, session->timeout*CONFIG_HZ);
 
-                __sync_fetch_and_sub(thread_in_wait, 1);
+                __sync_fetch_and_sub(current_thread_in_wait, 1);
                 
                 // check if timeout elapsed or condition evaluated
                 if (ret == 0)
@@ -205,11 +205,11 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
         if(*current_byte_in_buffer == 0 && session->blocking) {
                 mutex_unlock(&(buffer->operation_synchronizer));
 
-                __sync_fetch_and_add(thread_in_wait, 1);
+                __sync_fetch_and_add(current_thread_in_wait, 1);
 
                 ret = wait_event_interruptible_timeout(buffer->waitqueue, *current_byte_in_buffer != 0, session->timeout*CONFIG_HZ);
 
-                __sync_fetch_and_sub(thread_in_wait, 1);
+                __sync_fetch_and_sub(current_thread_in_wait, 1);
 
                 // check if timeout elapsed or condition evaluated
                 if (ret == 0) 
