@@ -7,10 +7,13 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/fs.h>
+#include <linux/pid.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
+#include <linux/tty.h>
 #include <linux/workqueue.h>
 #include <linux/version.h>
+
 #include "lib/defines.h"
 #include "lib/dynamic-buffer.h"
 
