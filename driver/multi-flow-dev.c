@@ -15,7 +15,6 @@
 #include <linux/version.h>
 
 #include "lib/defines.h"
-#include "lib/dynamic-buffer.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Alessandro Chillotti");
@@ -260,8 +259,6 @@ static ssize_t dev_ioctl(struct file *filp, unsigned int command, unsigned long 
         case TIMEOUT:
                 session->blocking = true;
                 session->timeout = get_seconds(param);
-                if (session->timeout == 0)
-                        session->timeout = MIN_SECONDS;
                 break;
         default:
                 return 0;

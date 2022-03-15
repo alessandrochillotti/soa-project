@@ -1,28 +1,15 @@
-#pragma once
+#include <stddef.h>
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/init.h>
+#include <linux/fs.h>
+#include <linux/pid.h>
+#include <linux/sched.h>
+#include <linux/slab.h>
+#include <linux/tty.h>
+#include <linux/version.h>
 
-/* definition of dynamic buffer element */
-typedef struct buffer_element {
-        char *content;              // content of element
-        int byte_read;              // byte number read
-        int size;
-        struct buffer_element* next;
-} buffer_element_t;
-
-/* definition of dynamic buffer */
-typedef struct dynamic_buffer {
-        buffer_element_t* head;     // head pointer to read
-        buffer_element_t* tail;     // tail pointer to attach new written block
-        struct mutex operation_synchronizer;
-        wait_queue_head_t waitqueue;
-} dynamic_buffer_t;
-
-/* functions prototypes */
-int             init_dynamic_buffer(dynamic_buffer_t *);
-int             init_buffer_element(buffer_element_t *, char *, int);
-unsigned long   write_dynamic_buffer(dynamic_buffer_t *, char *, int);
-unsigned long   read_dynamic_buffer(dynamic_buffer_t *, char *, int);
-void            free_element_buffer(buffer_element_t *);
-void            free_dynamic_buffer(dynamic_buffer_t *);
+#include "lib/defines.h"
 
 /* functions */
 int init_dynamic_buffer(dynamic_buffer_t *buffer)

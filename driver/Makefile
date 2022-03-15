@@ -1,4 +1,5 @@
-obj-m += multi-flow-dev.o
+obj-m += multi-flow-driver.o
+multi-flow-driver-objs := multi-flow-dev.o dynamic-buffer.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules 
