@@ -21,8 +21,8 @@ fi
 
 index=$(($1+1))
 
-cp /sys/module/multi_flow_dev/parameters/enabled /tmp/to_delete
+cp /sys/module/multi_flow_driver/parameters/enabled /tmp/to_delete
 
-awk 'BEGIN{FS=OFS=","} {if (NR==1) {$'${index}' = "'${2}'"}; print}' /tmp/to_delete > /sys/module/multi_flow_dev/parameters/enabled
+awk 'BEGIN{FS=OFS=","} {if (NR==1) {$'${index}' = "'${2}'"}; print}' /tmp/to_delete > /sys/module/multi_flow_driver/parameters/enabled
 
 rm /tmp/to_delete

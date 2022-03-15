@@ -21,4 +21,4 @@ fi
 
 index=$(($2*128+$1+1))
 
-cut -d, -f $index /sys/module/multi_flow_dev/parameters/thread_in_wait
+cut -d, -f $index /sys/module/multi_flow_driver/parameters/thread_in_wait

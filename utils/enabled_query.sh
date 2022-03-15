@@ -15,4 +15,4 @@ fi
 
 index=$(($1+1))
 
-cut -d, -f $index /sys/module/multi_flow_dev/parameters/enabled
+cut -d, -f $index /sys/module/multi_flow_driver/parameters/enabled
