@@ -8,7 +8,7 @@
 /* CONSTANTS DEFINITION */
 
 /* general information */
-#define MAX_BYTE_IN_BUFFER 32*4096      // 32 pagine
+#define MAX_BYTE_IN_BUFFER 10 // 32*4096      // 32 pagine
 #define MINOR_NUMBER 128
 #define FLOWS 2
 
@@ -76,6 +76,8 @@ typedef struct packed_work{
 #define get_minor(session)      MINOR(session->f_dentry->d_inode->i_rdev)
 #endif
 
+#define get_index(prio,minor)   (prio == HIGH_PRIORITY ? 128 : minor)
+
 /* FUNCTIONS PROTOTYPE */
 
 /* dynamic buffer functions prototype */
@@ -85,3 +87,34 @@ unsigned long   write_dynamic_buffer(dynamic_buffer_t *, char *, int);
 unsigned long   read_dynamic_buffer(dynamic_buffer_t *, char *, int);
 void            free_element_buffer(buffer_element_t *);
 void            free_dynamic_buffer(dynamic_buffer_t *);
+
+#define __p_wait_event_interruptible_timeout(wq, condition, ret, mutex)	        \
+do {									        \
+	DEFINE_WAIT(__wait);						        \
+									        \
+	for (;;) {							        \
+		prepare_to_wait(&wq, &__wait, TASK_INTERRUPTIBLE);	        \
+		if (condition) {                                                \
+                        if (mutex_trylock(mutex) == 1)                          \
+                                break;                                          \
+                }					                        \
+									        \
+		if (!signal_pending(current)) {				        \
+			ret = schedule_timeout(ret);			        \
+			if (!ret)					        \
+				break;					        \
+			continue;					        \
+		}							        \
+		ret = -ERESTARTSYS;					        \
+		break;							        \
+	}								        \
+	finish_wait(&wq, &__wait);					        \
+} while (0)
+
+#define p_wait_event_interruptible_timeout(wq, condition, timeout, mutex)       \
+({									        \
+	long __ret = timeout;						        \
+	if (!(condition))						        \
+		__p_wait_event_interruptible_timeout(wq, condition, __ret, mutex);\
+	__ret;								        \
+})

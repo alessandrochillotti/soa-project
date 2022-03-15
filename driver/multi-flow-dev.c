@@ -25,6 +25,7 @@ object_t files[MINOR_NUMBER];
 bool enabled[MINOR_NUMBER] = {[0 ... (MINOR_NUMBER-1)] = true}; 
 long byte_in_buffer[FLOWS * MINOR_NUMBER]; // first 128 -> low_priority, second 128 -> high_priority
 long thread_in_wait[FLOWS * MINOR_NUMBER];
+long booked_byte[MINOR_NUMBER+1] = {[0 ... (MINOR_NUMBER)] = 0}; // booked_byte[MINOR_NUMBER] is always 0
 
 module_param_array(enabled, bool, NULL, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param_array(byte_in_buffer, long, NULL, S_IRUSR | S_IRGRP);
@@ -77,14 +78,24 @@ void deferred_write(unsigned long data)
 {
         packed_work_t *work = container_of((void*)data,packed_work_t,the_work);
         object_t *object = files + work->minor;
+        dynamic_buffer_t *buffer = object->buffer[LOW_PRIORITY];
+
+        mutex_lock(&(buffer->operation_synchronizer));
 
         write_dynamic_buffer(object->buffer[LOW_PRIORITY], work->staging_area, work->size);
 
         printk(KERN_INFO "%s-%d: deferred write completed", MODNAME, work->minor);
 
+        kfree(container_of((void*)data,packed_work_t,the_work));
+
+        booked_byte[work->minor] -= work->size;
+        byte_in_buffer[work->minor] += work->size;
+
+        mutex_unlock(&(buffer->operation_synchronizer));        
+
         wake_up(&(object->buffer[LOW_PRIORITY]->waitqueue));
 
-        kfree(container_of((void*)data,packed_work_t,the_work));
+        printk("booked_byte[work->minor] = %ld\n", booked_byte[work->minor]);
 
         module_put(THIS_MODULE);
 }
@@ -92,6 +103,7 @@ void deferred_write(unsigned long data)
 static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t *off)
 {
         int ret;
+        long *current_booked_byte;
         long *current_byte_in_buffer;
         long *current_thread_in_wait;
         object_t *object;
@@ -106,31 +118,30 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         printk(KERN_INFO "%s-%d: write called\n", MODNAME, get_minor(filp));
 
         mutex_lock(&(buffer->operation_synchronizer));
-
+                
+        current_booked_byte = booked_byte + get_index(session->priority, get_minor(filp));
         current_byte_in_buffer = byte_in_buffer + (session->priority * MINOR_NUMBER) + get_minor(filp);
         current_thread_in_wait = thread_in_wait + (session->priority * MINOR_NUMBER) + get_minor(filp);
 
-        if(*current_byte_in_buffer == MAX_BYTE_IN_BUFFER && session->blocking) {
+        if(*current_byte_in_buffer + *current_booked_byte == MAX_BYTE_IN_BUFFER && session->blocking) {
                 mutex_unlock(&(buffer->operation_synchronizer));
 
                 __sync_fetch_and_add(current_thread_in_wait, 1);
 
-                ret = wait_event_interruptible_timeout(buffer->waitqueue, *current_byte_in_buffer < MAX_BYTE_IN_BUFFER, session->timeout*CONFIG_HZ);
+                ret = p_wait_event_interruptible_timeout(buffer->waitqueue, *current_byte_in_buffer + *current_booked_byte < MAX_BYTE_IN_BUFFER, session->timeout*CONFIG_HZ, &(buffer->operation_synchronizer));
 
                 __sync_fetch_and_sub(current_thread_in_wait, 1);
                 
                 // check if timeout elapsed or condition evaluated
                 if (ret == 0)
                         return 0;
-                else if (ret == 1)
-                        mutex_lock(&(buffer->operation_synchronizer));
-        } else if (*current_byte_in_buffer == MAX_BYTE_IN_BUFFER) {
+        } else if (*current_byte_in_buffer + *current_booked_byte == MAX_BYTE_IN_BUFFER) {
                 mutex_unlock(&(buffer->operation_synchronizer));
                 return 0;
         }
 
-        if(len > MAX_BYTE_IN_BUFFER - *current_byte_in_buffer) 
-                len = MAX_BYTE_IN_BUFFER - *current_byte_in_buffer;
+        if(len > MAX_BYTE_IN_BUFFER - (*current_byte_in_buffer + *current_booked_byte)) 
+                len = MAX_BYTE_IN_BUFFER - (*current_byte_in_buffer + *current_booked_byte);
 
         if (session->priority == HIGH_PRIORITY) {
                 temp_buffer = kmalloc(len, GFP_KERNEL);
@@ -171,7 +182,8 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                 __INIT_WORK(&(the_task->the_work),(void*)deferred_write,(unsigned long)(&(the_task->the_work)));
                 ret = 0;
 
-                *current_byte_in_buffer += len;
+                *current_booked_byte += len;
+                printk("*current_booked_byte = %ld\n", *current_booked_byte);
 
                 queue_work(object->workqueue, &(the_task->the_work));
         }
@@ -209,15 +221,13 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
 
                 __sync_fetch_and_add(current_thread_in_wait, 1);
 
-                ret = wait_event_interruptible_timeout(buffer->waitqueue, *current_byte_in_buffer != 0, session->timeout*CONFIG_HZ);
+                ret = p_wait_event_interruptible_timeout(buffer->waitqueue, *current_byte_in_buffer > 0, session->timeout*CONFIG_HZ, &(buffer->operation_synchronizer));
 
                 __sync_fetch_and_sub(current_thread_in_wait, 1);
 
                 // check if timeout elapsed or condition evaluated
                 if (ret == 0) 
                         return 0;
-                else if (ret == 1) 
-                        mutex_lock(&(buffer->operation_synchronizer));
         } else if (*current_byte_in_buffer == 0) {
                 mutex_unlock(&(buffer->operation_synchronizer));
                 return 0;
