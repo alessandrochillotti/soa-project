@@ -88,7 +88,7 @@ void            free_dynamic_buffer(dynamic_buffer_t *);
 
 /* definition of macro to manage byte in buffer and indexes*/
 #define get_booked_byte_index(priority,minor)                                   \
-        (priority == HIGH_PRIORITY ? 128 : minor)
+        (priority == HIGH_PRIORITY ? MINOR_NUMBER : minor)
 
 #define get_byte_in_buffer_index(priority, minor)                               \
         ((priority * MINOR_NUMBER) + minor)
@@ -97,11 +97,11 @@ void            free_dynamic_buffer(dynamic_buffer_t *);
         byte_in_buffer[get_byte_in_buffer_index(priority, minor)]
 
 #define busy_space(priority,minor)                                              \
-        byte_in_buffer[get_byte_in_buffer_index(priority, minor)] +             \
-        booked_byte[get_byte_in_buffer_index(priority,minor)]                                                                                                 \
+        (byte_in_buffer[get_byte_in_buffer_index(priority, minor)] +            \
+        booked_byte[get_booked_byte_index(priority,minor)])                                                                                            \
 
 #define free_space(priority,minor)                                              \
-        MAX_BYTE_IN_BUFFER - busy_space(priority,minor)                         
+        MAX_BYTE_IN_BUFFER - busy_space(priority,minor)               
 
 #define add_byte_in_buffer(priority,minor,len)                                  \
         byte_in_buffer[get_byte_in_buffer_index(priority,minor)] += len

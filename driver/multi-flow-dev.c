@@ -86,12 +86,12 @@ void deferred_write(unsigned long data)
 
         printk(KERN_INFO "%s-%d: deferred write completed", MODNAME, work->minor);
 
-        kfree(container_of((void*)data,packed_work_t,the_work));
-
         sub_booked_byte(work->minor,work->size);
         add_byte_in_buffer(LOW_PRIORITY,work->minor,work->size);
 
-        mutex_unlock(&(buffer->operation_synchronizer));        
+        mutex_unlock(&(buffer->operation_synchronizer));
+
+        kfree(container_of((void*)data,packed_work_t,the_work));
 
         wake_up(&(object->buffer[LOW_PRIORITY]->waitqueue));
 
@@ -124,7 +124,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                 ret = p_wait_event_interruptible_timeout(buffer->waitqueue, free_space(session->priority,minor) > 0, session->timeout*CONFIG_HZ, &(buffer->operation_synchronizer));
 
                 atomic_dec_thread_in_wait(session->priority, minor);
-                
+
                 // check if timeout elapsed
                 if (ret == 0)
                         return 0;
@@ -133,7 +133,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                 return 0;
         }
 
-        if(len > free_space(session->priority,minor)) 
+        if (len > free_space(session->priority,minor)) 
                 len = free_space(session->priority,minor);
 
         if (session->priority == HIGH_PRIORITY) {
@@ -175,7 +175,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                 __INIT_WORK(&(the_task->the_work),(void*)deferred_write,(unsigned long)(&(the_task->the_work)));
                 ret = 0;
 
-                add_booked_byte(minor,len); 
+                add_booked_byte(minor,len);
 
                 queue_work(object->workqueue, &(the_task->the_work));
         }
