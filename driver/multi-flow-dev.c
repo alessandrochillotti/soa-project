@@ -107,12 +107,12 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         dynamic_buffer_t *buffer;
         char *temp_buffer;
 
-        object = files + get_minor(filp);
+        minor = get_minor(filp);
+        object = files + minor;
         session = (session_t *)filp->private_data;
         buffer = object->buffer[session->priority];
-        minor = get_minor(filp);
 
-        printk(KERN_INFO "%s-%d: write called\n", MODNAME, get_minor(filp));
+        printk(KERN_INFO "%s-%d: write called\n", MODNAME, minor);
 
         mutex_lock(&(buffer->operation_synchronizer));
 
@@ -145,7 +145,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
                 write_dynamic_buffer(buffer, temp_buffer, len);
 
-                printk(KERN_INFO "%s-%d: %ld byte are written\n", MODNAME, get_minor(filp), (len-ret));
+                printk(KERN_INFO "%s-%d: %ld byte are written\n", MODNAME, minor, len-ret);
 
                 add_byte_in_buffer(HIGH_PRIORITY,minor,len);
 
@@ -157,19 +157,19 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
                 the_task =  kmalloc(sizeof(packed_work_t),GFP_KERNEL);
                 if (the_task == NULL) {
-                        printk(KERN_ERR "%s-%d: work queue buffer allocation failure\n",MODNAME,get_minor(filp));
+                        printk(KERN_ERR "%s-%d: work queue buffer allocation failure\n",MODNAME,minor);
                         return -ENOMEM;
                 }
 
                 the_task->staging_area = kmalloc(len, GFP_KERNEL);
                 if (the_task->staging_area == NULL) {
-                        printk(KERN_ERR "%s-%d: staging area allocation failure\n",MODNAME,get_minor(filp));
+                        printk(KERN_ERR "%s-%d: staging area allocation failure\n",MODNAME,minor);
                         return -ENOMEM;
                 }
 
                 // fill struct
                 ret = copy_from_user(the_task->staging_area, buff, len);
-                the_task->minor = get_minor(filp);
+                the_task->minor = minor;
                 the_task->size = len;
 
                 __INIT_WORK(&(the_task->the_work),(void*)deferred_write,(unsigned long)(&(the_task->the_work)));
@@ -193,12 +193,12 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
         session_t *session;
         dynamic_buffer_t *buffer;
 
-        object = files + get_minor(filp);
+        minor = get_minor(filp);
+        object = files + minor;
         session = (session_t *)filp->private_data;
         buffer = object->buffer[session->priority];
-        minor = get_minor(filp);
         
-        printk(KERN_INFO "%s-%d: read called\n",MODNAME,get_minor(filp));
+        printk(KERN_INFO "%s-%d: read called\n",MODNAME,minor);
 
         if (len == 0)
                 return 0;
@@ -233,7 +233,7 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
 
         mutex_unlock(&(buffer->operation_synchronizer));
 
-        printk(KERN_INFO "%s-%d: %ld byte are read\n", MODNAME, get_minor(filp), (len-ret));
+        printk(KERN_INFO "%s-%d: %ld byte are read\n",MODNAME,minor,len-ret);
 
         return len - ret;
 }
