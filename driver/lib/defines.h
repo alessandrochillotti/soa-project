@@ -65,6 +65,16 @@ typedef struct packed_work{
         struct work_struct the_work;
 } packed_work_t;
 
+/* FUNCTIONS PROTOTYPE */
+
+/* dynamic buffer functions prototype */
+int             init_dynamic_buffer(dynamic_buffer_t *);
+int             init_buffer_element(buffer_element_t *, char *, int);
+unsigned long   write_dynamic_buffer(dynamic_buffer_t *, char *, int);
+unsigned long   read_dynamic_buffer(dynamic_buffer_t *, char *, int);
+void            free_element_buffer(buffer_element_t *);
+void            free_dynamic_buffer(dynamic_buffer_t *);
+
 /* MACRO DEFINITION */
 #define get_seconds(sec)        (sec > MAX_SECONDS ? sec = MAX_SECONDS : (sec == 0 ? sec = MIN_SECONDS : sec))
 
@@ -76,18 +86,46 @@ typedef struct packed_work{
 #define get_minor(session)      MINOR(session->f_dentry->d_inode->i_rdev)
 #endif
 
-#define get_index(prio,minor)   (prio == HIGH_PRIORITY ? 128 : minor)
+/* definition of macro to manage byte in buffer and indexes*/
+#define get_booked_byte_index(priority,minor)                                   \
+        (priority == HIGH_PRIORITY ? 128 : minor)
 
-/* FUNCTIONS PROTOTYPE */
+#define get_byte_in_buffer_index(priority, minor)                               \
+        ((priority * MINOR_NUMBER) + minor)
 
-/* dynamic buffer functions prototype */
-int             init_dynamic_buffer(dynamic_buffer_t *);
-int             init_buffer_element(buffer_element_t *, char *, int);
-unsigned long   write_dynamic_buffer(dynamic_buffer_t *, char *, int);
-unsigned long   read_dynamic_buffer(dynamic_buffer_t *, char *, int);
-void            free_element_buffer(buffer_element_t *);
-void            free_dynamic_buffer(dynamic_buffer_t *);
+#define byte_to_read(priority,minor)                                            \
+        byte_in_buffer[get_byte_in_buffer_index(priority, minor)]
 
+#define busy_space(priority,minor)                                              \
+        byte_in_buffer[get_byte_in_buffer_index(priority, minor)] +             \
+        booked_byte[get_byte_in_buffer_index(priority,minor)]                                                                                                 \
+
+#define free_space(priority,minor)                                              \
+        MAX_BYTE_IN_BUFFER - busy_space(priority,minor)                         
+
+#define add_byte_in_buffer(priority,minor,len)                                  \
+        byte_in_buffer[get_byte_in_buffer_index(priority,minor)] += len
+
+#define add_booked_byte(minor,len)                                              \
+        booked_byte[minor] += len
+
+#define sub_byte_in_buffer(priority,minor,len)                                  \
+        byte_in_buffer[get_byte_in_buffer_index(priority,minor)] -= len
+
+#define sub_booked_byte(minor,len)                                              \
+        booked_byte[minor] -= len
+        
+#define atomic_inc_thread_in_wait(priority,minor)                               \
+        __sync_fetch_and_add(                                                   \
+                thread_in_wait + get_byte_in_buffer_index(priority,minor),      \
+                1)
+
+#define atomic_dec_thread_in_wait(priority,minor)                               \
+        __sync_fetch_and_sub(                                                   \
+                thread_in_wait + get_byte_in_buffer_index(priority,minor),      \
+                1)
+
+/* redefinition of wait_event_interruptible_timeout for awake only one thread */
 #define __p_wait_event_interruptible_timeout(wq, condition, ret, mutex)	        \
 do {									        \
 	DEFINE_WAIT(__wait);						        \
