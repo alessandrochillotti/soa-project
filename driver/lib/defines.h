@@ -94,10 +94,12 @@ do {									        \
 									        \
 	for (;;) {							        \
 		prepare_to_wait(&wq, &__wait, TASK_INTERRUPTIBLE);	        \
-		if (condition) {                                                \
-                        if (mutex_trylock(mutex) == 1)                          \
+                if (mutex_trylock(mutex)) {                                     \
+		        if (condition)                                          \
                                 break;                                          \
-                }					                        \
+                        else                                                    \
+                                mutex_unlock(mutex);                            \
+                }                  					        \
 									        \
 		if (!signal_pending(current)) {				        \
 			ret = schedule_timeout(ret);			        \
