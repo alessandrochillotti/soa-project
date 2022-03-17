@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DEFINES_H
+#define DEFINES_H
 
 /* MODULE INFORMATIONS DEFINITION */
 
@@ -28,18 +29,18 @@
 
 /* STRUCTURES DEFINITION */
 
-/* definition of dynamic buffer element */
-typedef struct buffer_element {
-        char *content;              // content of element
+/* definition of dynamic buffer segment */
+typedef struct data_segment {
+        char *content;              // content of segment
         int byte_read;              // byte number read
         int size;
-        struct buffer_element* next;
-} buffer_element_t;
+        struct data_segment* next;
+} data_segment_t;
 
 /* definition of dynamic buffer */
 typedef struct dynamic_buffer {
-        buffer_element_t* head;     // head pointer to read
-        buffer_element_t* tail;     // tail pointer to attach new written block
+        data_segment_t* head;     // head pointer to read
+        data_segment_t* tail;     // tail pointer to attach new written block
         struct mutex operation_synchronizer;
         wait_queue_head_t waitqueue;
 } dynamic_buffer_t;
@@ -59,8 +60,7 @@ typedef struct session {
 
 /* delayed work */
 typedef struct packed_work{
-        char* staging_area;		        // data to write
-        int size;
+        data_segment_t *staging_area;
         int minor;
         struct work_struct the_work;
 } packed_work_t;
@@ -69,10 +69,10 @@ typedef struct packed_work{
 
 /* dynamic buffer functions prototype */
 int             init_dynamic_buffer(dynamic_buffer_t *);
-int             init_buffer_element(buffer_element_t *, char *, int);
-unsigned long   write_dynamic_buffer(dynamic_buffer_t *, char *, int);
+int             init_data_segment(data_segment_t *, char *, int);
+unsigned long   write_dynamic_buffer(dynamic_buffer_t *, data_segment_t *);
 unsigned long   read_dynamic_buffer(dynamic_buffer_t *, char *, int);
-void            free_element_buffer(buffer_element_t *);
+void            free_segment_buffer(data_segment_t *);
 void            free_dynamic_buffer(dynamic_buffer_t *);
 
 /* MACRO DEFINITION */
@@ -158,3 +158,5 @@ do {									        \
 		__p_wait_event_interruptible_timeout(wq, condition, __ret, mutex);\
 	__ret;								        \
 })
+
+#endif

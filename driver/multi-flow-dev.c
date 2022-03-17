@@ -20,7 +20,7 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Alessandro Chillotti");
 
 static int Major;
-object_t files[MINOR_NUMBER];
+object_t devices[MINOR_NUMBER];
 
 bool enabled[MINOR_NUMBER] = {[0 ... (MINOR_NUMBER-1)] = true}; 
 long byte_in_buffer[FLOWS * MINOR_NUMBER]; // first 128 -> low_priority, second 128 -> high_priority
@@ -77,20 +77,21 @@ static int dev_release(struct inode *inode, struct file *file)
 void deferred_write(unsigned long data)
 {
         packed_work_t *work = container_of((void*)data,packed_work_t,the_work);
-        object_t *object = files + work->minor;
+        object_t *object = devices + work->minor;
         dynamic_buffer_t *buffer = object->buffer[LOW_PRIORITY];
 
         mutex_lock(&(buffer->operation_synchronizer));
 
-        write_dynamic_buffer(object->buffer[LOW_PRIORITY], work->staging_area, work->size);
+        write_dynamic_buffer(object->buffer[LOW_PRIORITY], work->staging_area);
 
         printk(KERN_INFO "%s-%d: deferred write completed", MODNAME, work->minor);
 
-        sub_booked_byte(work->minor,work->size);
-        add_byte_in_buffer(LOW_PRIORITY,work->minor,work->size);
+        sub_booked_byte(work->minor,work->staging_area->size);
+        add_byte_in_buffer(LOW_PRIORITY,work->minor,work->staging_area->size);
 
         mutex_unlock(&(buffer->operation_synchronizer));
 
+        free_segment_buffer(work->staging_area);
         kfree(container_of((void*)data,packed_work_t,the_work));
 
         wake_up(&(object->buffer[LOW_PRIORITY]->waitqueue));
@@ -102,13 +103,14 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 {
         int ret;
         int minor;
+        char *temp_buffer;
         object_t *object;
         session_t *session;
         dynamic_buffer_t *buffer;
-        char *temp_buffer;
+        data_segment_t *segment_to_write;
 
         minor = get_minor(filp);
-        object = files + minor;
+        object = devices + minor;
         session = (session_t *)filp->private_data;
         buffer = object->buffer[session->priority];
 
@@ -116,6 +118,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
         mutex_lock(&(buffer->operation_synchronizer));
 
+        // check if thread must block
         if(free_space(session->priority,minor) == 0 && session->blocking) {
                 mutex_unlock(&(buffer->operation_synchronizer));
 
@@ -136,46 +139,51 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         if (len > free_space(session->priority,minor)) 
                 len = free_space(session->priority,minor);
 
+        // prepare segment to write
+        temp_buffer = kmalloc(len, GFP_KERNEL);
+        if (temp_buffer == NULL) {
+                mutex_unlock(&(buffer->operation_synchronizer));
+                return -ENOMEM;
+        } 
+        
+        ret = copy_from_user(temp_buffer, buff, len);
+
+        segment_to_write = kmalloc(sizeof(data_segment_t), GFP_KERNEL);
+        if (segment_to_write == NULL) {
+                kfree(temp_buffer);
+                mutex_unlock(&(buffer->operation_synchronizer));
+                return -ENOMEM;
+        }
+        init_data_segment(segment_to_write, temp_buffer, len-ret);
+
+        // write data segment
         if (session->priority == HIGH_PRIORITY) {
-                temp_buffer = kmalloc(len, GFP_KERNEL);
-                if (temp_buffer == NULL) 
-                        return -ENOMEM;
-
-                ret = copy_from_user(temp_buffer, buff, len);
-
-                write_dynamic_buffer(buffer, temp_buffer, len);
+                write_dynamic_buffer(buffer, segment_to_write);
+                add_byte_in_buffer(HIGH_PRIORITY,minor,len-ret);
+                wake_up(&(buffer->waitqueue));
 
                 printk(KERN_INFO "%s-%d: %ld byte are written\n", MODNAME, minor, len-ret);
-
-                add_byte_in_buffer(HIGH_PRIORITY,minor,len);
-
-                wake_up(&(buffer->waitqueue));
         } else {
                 packed_work_t *the_task;
 
-                if(!try_module_get(THIS_MODULE)) return -ENODEV;
+                if(!try_module_get(THIS_MODULE)) 
+                        return -ENODEV;
 
                 the_task =  kmalloc(sizeof(packed_work_t),GFP_KERNEL);
                 if (the_task == NULL) {
+                        free_segment_buffer(segment_to_write);
+                        mutex_unlock(&(buffer->operation_synchronizer));
+
                         printk(KERN_ERR "%s-%d: work queue buffer allocation failure\n",MODNAME,minor);
                         return -ENOMEM;
                 }
 
-                the_task->staging_area = kmalloc(len, GFP_KERNEL);
-                if (the_task->staging_area == NULL) {
-                        printk(KERN_ERR "%s-%d: staging area allocation failure\n",MODNAME,minor);
-                        return -ENOMEM;
-                }
-
-                // fill struct
-                ret = copy_from_user(the_task->staging_area, buff, len);
+                the_task->staging_area = segment_to_write;
                 the_task->minor = minor;
-                the_task->size = len;
 
                 __INIT_WORK(&(the_task->the_work),(void*)deferred_write,(unsigned long)(&(the_task->the_work)));
-                ret = 0;
 
-                add_booked_byte(minor,len);
+                add_booked_byte(minor,len-ret);
 
                 queue_work(object->workqueue, &(the_task->the_work));
         }
@@ -194,7 +202,7 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
         dynamic_buffer_t *buffer;
 
         minor = get_minor(filp);
-        object = files + minor;
+        object = devices + minor;
         session = (session_t *)filp->private_data;
         buffer = object->buffer[session->priority];
         
@@ -288,20 +296,20 @@ int init_module(void)
 
         // setup of structures
         for (i = 0; i < MINOR_NUMBER; i++) {
-                files[i].workqueue = create_singlethread_workqueue("work-queue-" + i);
+                devices[i].workqueue = create_singlethread_workqueue("work-queue-" + i);
 
-                files[i].buffer[LOW_PRIORITY] = kmalloc(sizeof(dynamic_buffer_t), GFP_KERNEL);
-                files[i].buffer[HIGH_PRIORITY] = kmalloc(sizeof(dynamic_buffer_t), GFP_KERNEL);
+                devices[i].buffer[LOW_PRIORITY] = kmalloc(sizeof(dynamic_buffer_t), GFP_KERNEL);
+                devices[i].buffer[HIGH_PRIORITY] = kmalloc(sizeof(dynamic_buffer_t), GFP_KERNEL);
 
-                if (files[i].buffer[LOW_PRIORITY] == NULL || files[i].buffer[HIGH_PRIORITY] == NULL) break;
-
-                if (init_dynamic_buffer(files[i].buffer[LOW_PRIORITY]) == ENOMEM || init_dynamic_buffer(files[i].buffer[HIGH_PRIORITY]) == ENOMEM) break; 
+                if (devices[i].buffer[LOW_PRIORITY] == NULL || devices[i].buffer[HIGH_PRIORITY] == NULL) break;
         }
 
         if (i < MINOR_NUMBER) {
                 for (; i > -1; i--) {
-                        free_dynamic_buffer(files[i].buffer[LOW_PRIORITY]);
-                        free_dynamic_buffer(files[i].buffer[HIGH_PRIORITY]);
+                        destroy_workqueue(devices[i].workqueue);
+                        
+                        free_dynamic_buffer(devices[i].buffer[LOW_PRIORITY]);
+                        free_dynamic_buffer(devices[i].buffer[HIGH_PRIORITY]);
                 }
                 return -ENOMEM;
         }
@@ -317,10 +325,10 @@ void cleanup_module(void)
 
         // deallocation of structures
         for (i = 0; i < MINOR_NUMBER; i++) {
-                destroy_workqueue(files[i].workqueue);
+                destroy_workqueue(devices[i].workqueue);
 
-                free_dynamic_buffer(files[i].buffer[LOW_PRIORITY]);
-                free_dynamic_buffer(files[i].buffer[HIGH_PRIORITY]);
+                free_dynamic_buffer(devices[i].buffer[LOW_PRIORITY]);
+                free_dynamic_buffer(devices[i].buffer[HIGH_PRIORITY]);
         }
 
         unregister_chrdev(Major, DEVICE_NAME);
