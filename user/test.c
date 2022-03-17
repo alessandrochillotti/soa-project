@@ -9,7 +9,7 @@
 #include "lib/user.h"
 
 #define MINOR_NUMBER 128
-#define DATA "un semplice messaggio che sblocca tutti i fracchietti\n"
+#define DATA "ciao\n"
 #define SIZE strlen(DATA)
 
 typedef struct info_thread {
@@ -33,14 +33,32 @@ void *the_thread(void* path)
         }
         
         printf("device %s successfully opened\n", info->path);
-        
+       
+#ifdef TEST_1
         turn_to_low_priority(fd);
         if (info->id < 9) {
                 read(fd, content_read, 4);
         } else {
                 write(fd, DATA, SIZE);
-        }   
-        
+        }
+#elif defined TEST_2 
+        read(fd, content_read, 4);
+        printf("ho letto %s\n", content_read);
+#elif defined TEST_3
+        int written_bytes;
+        written_bytes = write(fd, DATA, SIZE);
+        printf("ho scritto %d\n", written_bytes);
+#elif defined TEST_4
+        turn_to_low_priority(fd);
+        read(fd, content_read, 4);
+        printf("ho letto %s\n", content_read);
+#elif defined TEST_5
+        int written_bytes;
+        turn_to_low_priority(fd);
+        written_bytes = write(fd, DATA, SIZE);
+        printf("ho scritto %d\n", written_bytes);
+#endif
+
         return NULL;
 }
 
@@ -65,8 +83,8 @@ int main(int argc, char** argv)
         printf("creating %d thread for device %s with major %d\n", threads, argv[1], major);
         
         device = strdup(argv[1]);
-        sprintf(command, "mknod %s c %d 0\n", device, major);
-        system(command);
+        // sprintf(command, "mknod %s c %d 0\n", device, major);
+        // system(command);
 
         for (int i = 0; i < threads; i++) {
                 thread[i].path = device;

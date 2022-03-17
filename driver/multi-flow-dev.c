@@ -301,6 +301,9 @@ int init_module(void)
                 devices[i].buffer[HIGH_PRIORITY] = kmalloc(sizeof(dynamic_buffer_t), GFP_KERNEL);
 
                 if (devices[i].buffer[LOW_PRIORITY] == NULL || devices[i].buffer[HIGH_PRIORITY] == NULL) break;
+
+                init_dynamic_buffer(devices[i].buffer[LOW_PRIORITY]);
+                init_dynamic_buffer(devices[i].buffer[HIGH_PRIORITY]);
         }
 
         if (i < MINOR_NUMBER) {
