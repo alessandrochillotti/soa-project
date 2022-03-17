@@ -91,7 +91,6 @@ void deferred_write(unsigned long data)
 
         mutex_unlock(&(buffer->operation_synchronizer));
 
-        free_segment_buffer(work->staging_area);
         kfree(container_of((void*)data,packed_work_t,the_work));
 
         wake_up(&(object->buffer[LOW_PRIORITY]->waitqueue));
@@ -307,7 +306,7 @@ int init_module(void)
         if (i < MINOR_NUMBER) {
                 for (; i > -1; i--) {
                         destroy_workqueue(devices[i].workqueue);
-                        
+
                         free_dynamic_buffer(devices[i].buffer[LOW_PRIORITY]);
                         free_dynamic_buffer(devices[i].buffer[HIGH_PRIORITY]);
                 }
