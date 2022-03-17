@@ -15,9 +15,9 @@ sudo rmmod multi_flow_dev
 ```
 
 ## Creazione del device file
-Per creare il device file bisogna digitare il seguente comando:
+Per creare il device file, spostandosi all'interno della directory `script`, basta digitare il seguente comando:
 ```
-mknod path c major minor
+sudo ./create_node path major minor
 ```
 dove:
 - `path` è il nome del file;
@@ -31,7 +31,7 @@ sudo ./user path major minor
 ```
 
 ## Utilizzo dei parametri del modulo
-Sono stati implementati quattro script con lo scopo di facilitare l'interazione con i parametri definiti.
+Sono stati implementati quattro script (all'interno della directory `script`) con lo scopo di facilitare l'interazione con i parametri definiti.
 
 ### Parametro di abilitazione del multi-flow device file
 Per questo parametro sono stati progettati due script:
