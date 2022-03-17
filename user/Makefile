@@ -1,7 +1,9 @@
-all:
+all:	
+	make user test1 test2 test3 test4 test5 test6
+user:
 	gcc user.c inout.c -lpthread -o user
 clean:
-	rm -f user test test?
+	rm -f user test?
 test1:
 	gcc test.c -lpthread -o test1 -DTEST_1
 test2:
