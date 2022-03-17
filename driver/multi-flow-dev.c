@@ -14,6 +14,7 @@
 #include <linux/workqueue.h>
 #include <linux/version.h>
 
+
 #include "lib/defines.h"
 
 MODULE_LICENSE("GPL");
@@ -84,7 +85,7 @@ void deferred_write(unsigned long data)
 
         write_dynamic_buffer(object->buffer[LOW_PRIORITY], work->staging_area);
 
-        printk(KERN_INFO "%s-%d: deferred write completed", MODNAME, work->minor);
+        printk(KERN_INFO "%s-%d: deferred write of '%s' completed", MODNAME, work->minor, work->staging_area->content);
 
         sub_booked_byte(work->minor,work->staging_area->size);
         add_byte_in_buffer(LOW_PRIORITY,work->minor,work->staging_area->size);
@@ -185,6 +186,8 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                 add_booked_byte(minor,len-ret);
 
                 queue_work(object->workqueue, &(the_task->the_work));
+
+                printk(KERN_INFO "%s-%d: '%s' queued", MODNAME, minor, segment_to_write->content);
         }
 
         mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));

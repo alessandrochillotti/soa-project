@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <sys/syscall.h>
 #include <sys/ioctl.h>
 
 #include "lib/user.h"
@@ -11,6 +12,8 @@
 #define MINOR_NUMBER 128
 #define DATA "ciao\n"
 #define SIZE strlen(DATA)
+
+char *to_write[10] = {"a","b","c","d","e","f","g","h","i","l"};
 
 typedef struct info_thread {
         char* path;
@@ -36,10 +39,13 @@ void *the_thread(void* path)
        
 #ifdef TEST_1
         turn_to_low_priority(fd);
-        if (info->id < 9) {
+        if (info->id != 4) {
                 read(fd, content_read, 4);
+                printf("ho letto %s\n", content_read);
         } else {
-                write(fd, DATA, SIZE);
+                int written_bytes;
+                written_bytes = write(fd, DATA, SIZE);
+                printf("ho scritto %d byte\n", written_bytes);
         }
 #elif defined TEST_2 
         read(fd, content_read, 4);
@@ -47,7 +53,7 @@ void *the_thread(void* path)
 #elif defined TEST_3
         int written_bytes;
         written_bytes = write(fd, DATA, SIZE);
-        printf("ho scritto %d\n", written_bytes);
+        printf("ho scritto %d byte\n", written_bytes);
 #elif defined TEST_4
         turn_to_low_priority(fd);
         read(fd, content_read, 4);
@@ -56,7 +62,12 @@ void *the_thread(void* path)
         int written_bytes;
         turn_to_low_priority(fd);
         written_bytes = write(fd, DATA, SIZE);
-        printf("ho scritto %d\n", written_bytes);
+        printf("ho scritto %d byte\n", written_bytes);
+#elif defined TEST_6
+        int written_bytes;
+        turn_to_low_priority(fd);
+        written_bytes = write(fd, to_write[info->id], 1);
+        printf("ho prenotato %d byte\n", written_bytes);
 #endif
 
         return NULL;
