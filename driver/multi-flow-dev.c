@@ -116,6 +116,12 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
         printk(KERN_INFO "%s-%d: write called\n", MODNAME, minor);
 
+        // copy data to write in a temporary buffer
+        temp_buffer = kmalloc(len, GFP_KERNEL);
+        if (temp_buffer == NULL)
+                return -ENOMEM;
+        ret = copy_from_user(temp_buffer, buff, len);
+
         mutex_lock(&(buffer->operation_synchronizer));
 
         // check if thread must block
@@ -132,21 +138,13 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                 if (ret == 0)
                         return 0;
         } else if (free_space(session->priority,minor) == 0) {
+                kfree(temp_buffer);
                 mutex_unlock(&(buffer->operation_synchronizer));
                 return 0;
         }
 
         if (len > free_space(session->priority,minor)) 
                 len = free_space(session->priority,minor);
-
-        // prepare segment to write
-        temp_buffer = kmalloc(len, GFP_KERNEL);
-        if (temp_buffer == NULL) {
-                mutex_unlock(&(buffer->operation_synchronizer));
-                return -ENOMEM;
-        } 
-        
-        ret = copy_from_user(temp_buffer, buff, len);
 
         segment_to_write = kmalloc(sizeof(data_segment_t), GFP_KERNEL);
         if (segment_to_write == NULL) {
@@ -199,6 +197,7 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
 {
         int ret;
         int minor;
+        char *temp_buffer;
         object_t *object;
         session_t *session;
         dynamic_buffer_t *buffer;
@@ -235,13 +234,19 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
         if(len > byte_to_read(session->priority,minor))
                 len = byte_to_read(session->priority,minor);
 
-        ret = read_dynamic_buffer(buffer, buff, len);
+        temp_buffer = kmalloc(len, GFP_KERNEL);
+        if (temp_buffer == NULL)
+                return -ENOMEM;
+
+        read_dynamic_buffer(buffer, temp_buffer, len);
 
         sub_byte_in_buffer(session->priority,minor,len-ret);
 
         wake_up(&(buffer->waitqueue));
 
         mutex_unlock(&(buffer->operation_synchronizer));
+
+        ret = copy_to_user(buff,temp_buffer,len);
 
         printk(KERN_INFO "%s-%d: %ld byte are read\n",MODNAME,minor,len-ret);
 

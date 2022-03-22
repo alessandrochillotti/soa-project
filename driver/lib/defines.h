@@ -71,7 +71,7 @@ typedef struct packed_work{
 int             init_dynamic_buffer(dynamic_buffer_t *);
 int             init_data_segment(data_segment_t *, char *, int);
 unsigned long   write_dynamic_buffer(dynamic_buffer_t *, data_segment_t *);
-unsigned long   read_dynamic_buffer(dynamic_buffer_t *, char *, int);
+void            read_dynamic_buffer(dynamic_buffer_t *, char *, int);
 void            free_segment_buffer(data_segment_t *);
 void            free_dynamic_buffer(dynamic_buffer_t *);
 

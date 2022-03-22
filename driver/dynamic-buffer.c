@@ -49,46 +49,38 @@ unsigned long write_dynamic_buffer(dynamic_buffer_t *buffer, data_segment_t *seg
         return segment_to_write->size;
 }
 
-unsigned long read_dynamic_buffer(dynamic_buffer_t *buffer, char __user *read_content, int len)
+void read_dynamic_buffer(dynamic_buffer_t *buffer, char *read_content, int len)
 {
         data_segment_t *cur;
         data_segment_t *old;
 
         int byte_read;
-        int ret;
 
         byte_read = 0;
         cur = buffer->head;
 
         // read whole blocks
         while (cur != NULL && (len - byte_read > cur->size - cur->byte_read)) {
-                ret = copy_to_user(read_content + byte_read, cur->content + cur->byte_read, cur->size - cur->byte_read);
+                memcpy(read_content + byte_read, cur->content + cur->byte_read, cur->size - cur->byte_read);
 
-                byte_read += cur->size - cur->byte_read - ret;
+                byte_read += cur->size - cur->byte_read;
 
-                if (ret == 0) {
-                        old = cur;
-                        cur = cur->next;
+                old = cur;
+                cur = cur->next;
 
-                        buffer->head = cur;
-                        if (buffer->head == buffer->tail) buffer->tail = NULL;
-                        free_segment_buffer(old);
-                } else {
-                        cur->byte_read += cur->size - cur->byte_read - ret;
-
-                        return len - byte_read;
-                }
+                buffer->head = cur;
+                if (buffer->head == buffer->tail) 
+                        buffer->tail = NULL;
+                free_segment_buffer(old);
         }
 
         // check if i must read in this condition: byte_to_read < cur->size
         if (cur != NULL) {
-                ret = copy_to_user(read_content + byte_read, cur->content + cur->byte_read, len - byte_read);
+                memcpy(read_content + byte_read, cur->content + cur->byte_read, len - byte_read);
 
-                cur->byte_read += len - byte_read - ret;
-                byte_read += len - byte_read - ret;
+                cur->byte_read += len - byte_read;
+                byte_read += len - byte_read;
         }
-
-        return len - byte_read;
 }
 
 void free_segment_buffer(data_segment_t *segment)
