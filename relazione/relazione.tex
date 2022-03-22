@@ -157,7 +157,7 @@
 \begin{document}
 \maketitle
 
-\section{Traccia del progetto}
+\section{Traccia del progetto (traduzione)}
 Questa specifica è legata ad un driver Linux che implementa flussi di dati a priorità bassa e alta. Attraverso una sessione aperta al devide file, un thread può leggere/scrivere segmenti dati. La consegna dei dati segue una policy First-in-First-out lungo ciascuno dei due diversi flussi di dati (bassa e alta priorità). Dopo le operazioni di lettura, i dati devono scomparire dal flusso. Inoltre, il flusso dati di alta priorità deve offrire operazioni di scrittura sincrone, mentre il flusso dati di bassa priorità deve offrire una esecuzione asincrona (basata su delayed work) delle operazioni di scrittura, pur mantenendo l'interfaccia in grado di notificare in modo sincrono l'esito. Le operazioni di lettura sono tutte eseguite sincronamente. Il device driver supporta 128 device corrispondenti alla stessa quantità di minor number. Il device driver deve implementare il supporto per il servizio \texttt{ioctl(..)} in modo tale da gestire la sessione di I/O come segue:
 \begin{itemize}
 \item setup del livello di priorità (alto o basso) per le operazioni;
@@ -172,5 +172,58 @@ Alcuni parametri e funzioni del modulo Linux dovrebbero essere in grado di abili
 \end{itemize}
 
 \section{Relazione del progetto svolto}
+\subsection{Rappresentazione dei multi-flow device file}
+La rappresentazione dei multi-flow device file è definita dalla struttura \texttt{object\_t} che contiene:
+\begin{itemize}
+\item un puntatore ad una workqueue, ovvero \texttt{struct workqueue\_struct *workqueue}. Il puntatore alla workqueue è stato inserito all'interno della struttura rappresenta il multi-flow device file perché è utile solo nel caso in cui si sta lavorando a \texttt{LOW PRIORITY}.
+\item due puntatori ad un buffer, ovvero \texttt{dynamic\_buffer\_t *buffer}.
+\end{itemize}
+
+\subsection{Rappresentazione del buffer}
+La rappresentazione del buffer è definita dalla struttura \texttt{dynamic\_buffer} che contiene:
+\begin{itemize}
+\item un puntatore \texttt{head} di tipo \texttt{data\_segment};
+\item un puntatore \texttt{tail} di tipo \texttt{data\_segment};
+\item un mutex che permette di sincronizzare le operazioni relative al buffer;
+\item una waitqueue.
+\end{itemize}
+
+L'organizzazione della rappresentazione del buffer è rappresentata dalla seguente figura.
+
+\begin{figure}[ht!]
+\centering
+\frame{\includegraphics[width=0.5\textwidth]{img/data-segment}}
+\end{figure}
+
+Si può notare come siamo presenti \texttt{256} waitqueue, ovvero una per ogni buffer. Questa scelta è stata fatta perché il lavoro svolto su un altro buffer è sicuramente indipendente dal lavoro fatto da un altor buffer. Inoltre, nella funzione di inizializzazione del modulo vengono create delle singlethread workqueue. In questo modo il deferred work viene processato lungo un unico kworker deamon ed esso riporta le operazioni di scrittura sul buffer di bassa priorità nel medesimo ordine con cui sono state schedulate, senza dover implementare meccanismi di ordinamento e sincronizzazione.
+
+\subsection{Parametri del modulo}
+Sono stati definiti dei parametri del modulo ed essi sono stati utilizzati all'interno del driver come variabili operative. In particolare sono stati definiti i seguenti parametri:
+\begin{itemize}
+\item \texttt{enabled}: un vettore di \texttt{128} elementi di tipo \texttt{bool}, ove ogni elemento \texttt{i} indica se il multi-flow device file relativo al minor number \texttt{i} è attivo o meno;
+\item \texttt{byte\_in\_buffer}: un vettore di \texttt{256} elementi di tipo \texttt{long}, ove ogni elemento riporta il numero di byte presente all'interno del buffer relativo ad uno specifico minor number, in particolare:
+\begin{itemize}
+\item i primi \texttt{128} elementi sono relativi al buffer di bassa priorità del multi-flow device file con minor number \texttt{i};
+\item i secondi \texttt{128} elementi sono relativi al buffer di alta priorità del multi-flow device file con minor number $\frac{\mathtt{i}}{\mathtt{2}}$;
+\end{itemize}
+\item \texttt{thread\_in\_wait}: un vettore di \texttt{256} elementi di tipo \texttt{long}, ove ogni elemento riporta il numero di byte presente all'interno del buffer relativo ad uno specifico minor number, secondo la medesima regola di \texttt{byte\_in\_buffer}.
+\end{itemize}
+
+La scelta di creare un vettore di \texttt{256} elementi anziché \texttt{128} è stata fatta perché ha permesso la realizzazione di un codice migliore dal punto di vista della leggibilità. Questo perché, indipendemente dalla priorità, prima di andare ad effettuare una scrittura o una lettura si effettua un controllo sul contento del buffer (i.e. spazio libero in caso di scrittura, byte nel buffer in caso di scrittura). Infatti, nel caso in cui si fossero creati due vettori da \texttt{128} elementi si sarebbero dovuti differenziare i casi. A tal proposito è stata realizzata la seguente macro:
+\begin{lstlisting}
+#define get_byte_in_buffer_index(priority, minor)	\
+        ((priority * MINOR_NUMBER) + minor)
+\end{lstlisting}
+
+\subsection{Operazioni sui multi-flow device file}
+Nelle seguenti sottosezioni sono descritte le funzioni che compongono il driver.
+
+\subsection{Operazione d'apertura}
+La funzione \texttt{dev\_open} consente l'apertura 
+
+\subsection{Operazione di rilascio}
+\subsection{Operazione di scrittura}
+\subsection{Operazione di lettura}
+
 
 \end{document}
