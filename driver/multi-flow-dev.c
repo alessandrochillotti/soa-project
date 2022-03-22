@@ -240,7 +240,7 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
 
         read_dynamic_buffer(buffer, temp_buffer, len);
 
-        sub_byte_in_buffer(session->priority,minor,len-ret);
+        sub_byte_in_buffer(session->priority,minor,len);
 
         wake_up(&(buffer->waitqueue));
 
