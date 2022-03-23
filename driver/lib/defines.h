@@ -54,7 +54,8 @@ typedef struct object {
 /* session struct */
 typedef struct session {
         int priority;
-        bool blocking;
+        // bool blocking;
+        gfp_t flags;
         unsigned long timeout;
 } session_t;
 
@@ -101,7 +102,21 @@ void            free_dynamic_buffer(dynamic_buffer_t *);
         booked_byte[get_booked_byte_index(priority,minor)])                                                                                            \
 
 #define free_space(priority,minor)                                              \
-        MAX_BYTE_IN_BUFFER - busy_space(priority,minor)               
+        MAX_BYTE_IN_BUFFER - busy_space(priority,minor)         
+
+#define is_there_space(priority,minor)                                          \
+        (free_space(priority,minor) == 0 ? 0 : 1)                            
+
+#define is_blocking(flags)                                                      \
+        (flags == GFP_ATOMIC ? 0 : 1)
+
+#define mutex_try_or_lock(mutex,flags)                                          \
+        if (is_blocking(flags))                                                 \
+                mutex_lock(mutex);                                              \
+        else {                                                                  \
+                if (!mutex_trylock(mutex))                                      \
+                        return -EAGAIN;                                         \
+        }
 
 #define add_byte_in_buffer(priority,minor,len)                                  \
         byte_in_buffer[get_byte_in_buffer_index(priority,minor)] += len

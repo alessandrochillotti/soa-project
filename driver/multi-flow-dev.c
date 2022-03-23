@@ -45,23 +45,21 @@ static int dev_open(struct inode *inode, struct file *file)
         }
 
         // check if multi-flow device is enabled for this minor
-        if (enabled[minor]) {
-                session = kmalloc(sizeof(session_t), GFP_KERNEL);
-                if (session == NULL)
-                        return -ENOMEM;
+        if (!atomic_read((atomic_t *)&(enabled[minor])))
+                return -EINVAL;
+        
+        session = kmalloc(sizeof(session_t), GFP_KERNEL);
+        if (session == NULL)
+                return -ENOMEM;
 
-                session->priority = HIGH_PRIORITY;
-                session->blocking = true;
-                session->timeout = MAX_SECONDS;
+        session->priority = HIGH_PRIORITY;
+        session->flags = GFP_KERNEL;
+        session->timeout = MAX_SECONDS;
 
-                file->private_data = session;
+        file->private_data = session;
 
-                printk(KERN_INFO "%s-%d: device file successfully opened for object\n", MODNAME, minor);
-        } else {
-                printk(KERN_INFO "%s-%d: device file can't be opened\n", MODNAME, minor);
-                return -1;
-        }
-
+        printk(KERN_INFO "%s-%d: device file successfully opened for object\n", MODNAME, minor);
+        
         return 0;
 }
 
@@ -94,7 +92,7 @@ void deferred_write(unsigned long data)
 
         kfree(container_of((void*)data,packed_work_t,the_work));
 
-        wake_up(&(object->buffer[LOW_PRIORITY]->waitqueue));
+        wake_up_interruptible(&(object->buffer[LOW_PRIORITY]->waitqueue));
 
         module_put(THIS_MODULE);
 }
@@ -102,6 +100,7 @@ void deferred_write(unsigned long data)
 static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t *off)
 {
         int ret;
+        int byte_not_copied;
         int minor;
         char *temp_buffer;
         object_t *object;
@@ -117,15 +116,21 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         printk(KERN_INFO "%s-%d: write called\n", MODNAME, minor);
 
         // copy data to write in a temporary buffer
-        temp_buffer = kmalloc(len, GFP_KERNEL);
+        temp_buffer = kmalloc(len, session->flags);
         if (temp_buffer == NULL)
                 return -ENOMEM;
-        ret = copy_from_user(temp_buffer, buff, len);
+        byte_not_copied = copy_from_user(temp_buffer, buff, len);
 
-        mutex_lock(&(buffer->operation_synchronizer));
+        segment_to_write = kmalloc(sizeof(data_segment_t), session->flags);
+        if (segment_to_write == NULL) {
+                kfree(temp_buffer);
+                return -ENOMEM;
+        }
+
+        mutex_try_or_lock(&(buffer->operation_synchronizer),session->flags);
 
         // check if thread must block
-        if(free_space(session->priority,minor) == 0 && session->blocking) {
+        if(is_there_space(session->priority,minor) && is_blocking(session->flags)) {
                 mutex_unlock(&(buffer->operation_synchronizer));
 
                 atomic_inc_thread_in_wait(session->priority, minor);
@@ -136,29 +141,29 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
                 // check if timeout elapsed
                 if (ret == 0)
-                        return 0;
-        } else if (free_space(session->priority,minor) == 0) {
-                kfree(temp_buffer);
+                        return -EAGAIN;
+                if (ret == -ERESTARTSYS)
+                        return -EINTR;
+        } else if (is_there_space(session->priority,minor)) {
                 mutex_unlock(&(buffer->operation_synchronizer));
-                return 0;
+
+                kfree(temp_buffer);
+                kfree(segment_to_write);
+                return -EAGAIN;
         }
 
-        if (len > free_space(session->priority,minor)) 
+        if (len-byte_not_copied > free_space(session->priority,minor)) 
                 len = free_space(session->priority,minor);
+        else 
+                len = len - byte_not_copied;
 
-        segment_to_write = kmalloc(sizeof(data_segment_t), GFP_KERNEL);
-        if (segment_to_write == NULL) {
-                kfree(temp_buffer);
-                mutex_unlock(&(buffer->operation_synchronizer));
-                return -ENOMEM;
-        }
-        init_data_segment(segment_to_write, temp_buffer, len-ret);
+        init_data_segment(segment_to_write, temp_buffer, len);
 
         // write data segment
         if (session->priority == HIGH_PRIORITY) {
                 write_dynamic_buffer(buffer, segment_to_write);
-                add_byte_in_buffer(HIGH_PRIORITY,minor,len-ret);
-                wake_up(&(buffer->waitqueue));
+                add_byte_in_buffer(HIGH_PRIORITY,minor,len);
+                wake_up_interruptible(&(buffer->waitqueue));
 
                 printk(KERN_INFO "%s-%d: %ld byte are written\n", MODNAME, minor, len-ret);
         } else {
@@ -167,7 +172,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                 if(!try_module_get(THIS_MODULE)) 
                         return -ENODEV;
 
-                the_task =  kmalloc(sizeof(packed_work_t),GFP_KERNEL);
+                the_task =  kmalloc(sizeof(packed_work_t),session->flags);
                 if (the_task == NULL) {
                         free_segment_buffer(segment_to_write);
                         mutex_unlock(&(buffer->operation_synchronizer));
@@ -181,7 +186,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
                 __INIT_WORK(&(the_task->the_work),(void*)deferred_write,(unsigned long)(&(the_task->the_work)));
 
-                add_booked_byte(minor,len-ret);
+                add_booked_byte(minor,len);
 
                 queue_work(object->workqueue, &(the_task->the_work));
 
@@ -190,7 +195,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
         mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
 
-        return len-ret;
+        return len;
 }
 
 static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
@@ -212,9 +217,9 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
         if (len == 0)
                 return 0;
 
-        mutex_lock(&(buffer->operation_synchronizer));
+        mutex_try_or_lock(&(buffer->operation_synchronizer),session->flags);
 
-        if(byte_to_read(session->priority,minor) == 0 && session->blocking) {
+        if(byte_to_read(session->priority,minor) == 0 && is_blocking(session->flags)) {
                 mutex_unlock(&(buffer->operation_synchronizer));
 
                 atomic_inc_thread_in_wait(session->priority, minor);
@@ -225,16 +230,18 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
 
                 // check if timeout elapsed
                 if (ret == 0)
-                        return 0;
+                        return -EAGAIN;
+                if (ret == -ERESTARTSYS)
+                        return -EINTR;
         } else if (byte_to_read(session->priority,minor) == 0) {
                 mutex_unlock(&(buffer->operation_synchronizer));
-                return 0;
+                return -EAGAIN;
         }
  
         if(len > byte_to_read(session->priority,minor))
                 len = byte_to_read(session->priority,minor);
 
-        temp_buffer = kmalloc(len, GFP_KERNEL);
+        temp_buffer = kmalloc(len, session->flags);
         if (temp_buffer == NULL)
                 return -ENOMEM;
 
@@ -242,7 +249,7 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
 
         sub_byte_in_buffer(session->priority,minor,len);
 
-        wake_up(&(buffer->waitqueue));
+        wake_up_interruptible(&(buffer->waitqueue));
 
         mutex_unlock(&(buffer->operation_synchronizer));
 
@@ -265,13 +272,13 @@ static ssize_t dev_ioctl(struct file *filp, unsigned int command, unsigned long 
                 session->priority = LOW_PRIORITY;
                 break;
         case BLOCK:
-                session->blocking = true;
+                session->flags = GFP_KERNEL;
                 break;
         case UNBLOCK:
-                session->blocking = false;
+                session->flags = GFP_ATOMIC;
                 break;
         case TIMEOUT:
-                session->blocking = true;
+                session->flags = GFP_ATOMIC;
                 session->timeout = get_seconds(param);
                 break;
         default:
