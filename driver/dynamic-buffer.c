@@ -2,6 +2,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
+#include <linux/list.h>
 #include <linux/fs.h>
 #include <linux/pid.h>
 #include <linux/sched.h>
@@ -14,12 +15,18 @@
 /* functions */
 int init_dynamic_buffer(dynamic_buffer_t *buffer)
 {
-        buffer->head = NULL;
-        buffer->tail = NULL;
+        struct list_head *head;
+
+        head = &(buffer->head);
 
         mutex_init(&(buffer->operation_synchronizer));
 
         init_waitqueue_head(&(buffer->waitqueue));
+
+        INIT_LIST_HEAD(head);
+        
+        head = &(buffer->head_process);
+        INIT_LIST_HEAD(head);
 
         return 0;
 }
@@ -29,56 +36,49 @@ int init_data_segment(data_segment_t *element, char *content, int len)
         element->content = content;
         element->size = len;
         element->byte_read = 0;
-        element->next = NULL;
 
         return 0;
 }
 
-unsigned long write_dynamic_buffer(dynamic_buffer_t *buffer, data_segment_t *segment_to_write)
+void write_dynamic_buffer(dynamic_buffer_t *buffer, data_segment_t *segment_to_write)
 {
-        if (buffer->head == NULL) { // zero segments
-                buffer->head = segment_to_write;
-        } else if (buffer->tail == NULL) { // one segment
-                buffer->tail = segment_to_write;
-                buffer->head->next = buffer->tail;
-        } else { // general case
-                buffer->tail->next = segment_to_write;
-                buffer->tail = segment_to_write;
-        }
-
-        return segment_to_write->size;
+        list_add_tail(&(segment_to_write->list),&(buffer->head));
 }
 
 void read_dynamic_buffer(dynamic_buffer_t *buffer, char *read_content, int len)
 {
-        data_segment_t *cur;
-        data_segment_t *old;
-
+        struct list_head *cur;
+        struct list_head *old;
+        struct list_head *head;
+        data_segment_t *cur_seg;
         int byte_read;
 
+        head = &(buffer->head);
+        cur = (head)->next;
+        cur_seg = list_entry(cur, struct data_segment, list);
         byte_read = 0;
-        cur = buffer->head;
 
-        // read whole blocks
-        while (cur != NULL && (len - byte_read > cur->size - cur->byte_read)) {
-                memcpy(read_content + byte_read, cur->content + cur->byte_read, cur->size - cur->byte_read);
-
-                byte_read += cur->size - cur->byte_read;
+        while (len - byte_read >= cur_seg->size - cur_seg->byte_read) {
+                memcpy(read_content + byte_read, cur_seg->content + cur_seg->byte_read, cur_seg->size - cur_seg->byte_read);
+                byte_read += cur_seg->size - cur_seg->byte_read;
 
                 old = cur;
                 cur = cur->next;
-
-                buffer->head = cur;
-                if (buffer->head == buffer->tail) 
-                        buffer->tail = NULL;
-                free_segment_buffer(old);
+                free_segment_buffer(cur_seg);
+                list_del(old);
+                
+                if (cur == head)
+                        break;
+                cur_seg = list_entry(cur, struct data_segment, list);
         }
-
+        
         // check if i must read in this condition: byte_to_read < cur->size
-        if (cur != NULL) {
-                memcpy(read_content + byte_read, cur->content + cur->byte_read, len - byte_read);
+        if (cur != head) {
+                cur_seg = list_entry(cur, struct data_segment, list);
 
-                cur->byte_read += len - byte_read;
+                memcpy(read_content + byte_read, cur_seg->content + cur_seg->byte_read, len - byte_read);
+
+                cur_seg->byte_read += len - byte_read;
                 byte_read += len - byte_read;
         }
 }
@@ -92,17 +92,18 @@ void free_segment_buffer(data_segment_t *segment)
 }
 
 void free_dynamic_buffer(dynamic_buffer_t *buffer)
-{
-        data_segment_t* cur;
-        data_segment_t* old;
+{ 
+        struct list_head *cur;
+        struct list_head *head;
+        data_segment_t *cur_seg;
 
-        cur = buffer->head;
+        head = &(buffer->head);
 
-        while (cur != NULL) {
-                old = cur;
-                cur = cur->next;
+        list_for_each(cur, head) {
+                cur_seg = list_entry(cur, data_segment_t, list);
 
-                free_segment_buffer(old);       
+                free_segment_buffer(cur_seg);
+                list_del(cur);
         }
 
         mutex_destroy(&(buffer->operation_synchronizer));
