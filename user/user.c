@@ -14,8 +14,6 @@ int main(int argc, char** argv)
 {
         int ret;
         int fd;
-        int major;
-        int minor;
         char *path;
         unsigned long timeout;
 
@@ -28,17 +26,12 @@ int main(int argc, char** argv)
         char command[100];
         char tmp[MAX_TMP_SIZE];
 
-        if (argc < 4) {
-                printf("usage: pathname major minor\n");
+        if (argc < 2) {
+                printf("usage: pathname\n");
                 return -1;
         }
 
         path = argv[1];
-        major = strtol(argv[2],NULL,10);
-        minor = strtol(argv[3],NULL,10);
-
-        // sprintf(command,"mknod %s c %d %d\n", path, major, minor);
-        // system(command); 
 
         // open device
         fd = open(path, O_RDWR);
