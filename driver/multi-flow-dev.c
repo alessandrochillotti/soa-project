@@ -7,13 +7,13 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/fs.h>
+#include <linux/list.h>
 #include <linux/pid.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/tty.h>
 #include <linux/workqueue.h>
 #include <linux/version.h>
-
 
 #include "lib/defines.h"
 
@@ -40,12 +40,12 @@ static int dev_open(struct inode *inode, struct file *file)
 
         minor = get_minor(file);
 
-        if (minor >= MINOR_NUMBER){
+        if (minor >= MINOR_NUMBER) {
                 return -ENODEV;
         }
 
         // check if multi-flow device is enabled for this minor
-        if (!atomic_read((atomic_t *)&(enabled[minor])))
+        if (!enabled[minor])
                 return -EINVAL;
         
         session = kmalloc(sizeof(session_t), GFP_KERNEL);
@@ -130,12 +130,19 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         mutex_try_or_lock(&(buffer->operation_synchronizer),session->flags);
 
         // check if thread must block
-        if(is_there_space(session->priority,minor) && is_blocking(session->flags)) {
+        if(!is_there_space(session->priority,minor) && is_blocking(session->flags)) {
                 mutex_unlock(&(buffer->operation_synchronizer));
 
                 atomic_inc_thread_in_wait(session->priority, minor);
 
-                ret = p_wait_event_interruptible_timeout(buffer->waitqueue, free_space(session->priority,minor) > 0, session->timeout*CONFIG_HZ, &(buffer->operation_synchronizer));
+                ret = wait_event_interruptible_exclusive_timeout(
+                        buffer->waitqueue, 
+                        lock_and_awake(
+                                is_there_space(session->priority,minor),
+                                &(buffer->operation_synchronizer)
+                                ),
+                        session->timeout*CONFIG_HZ
+                );
 
                 atomic_dec_thread_in_wait(session->priority, minor);
 
@@ -144,12 +151,12 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                         return -EAGAIN;
                 if (ret == -ERESTARTSYS)
                         return -EINTR;
-        } else if (is_there_space(session->priority,minor)) {
+        } else if (!is_there_space(session->priority,minor)) {
                 mutex_unlock(&(buffer->operation_synchronizer));
 
                 kfree(temp_buffer);
                 kfree(segment_to_write);
-                return -EAGAIN;
+                return 0;
         }
 
         if (len-byte_not_copied > free_space(session->priority,minor)) 
@@ -165,7 +172,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                 add_byte_in_buffer(HIGH_PRIORITY,minor,len);
                 wake_up_interruptible(&(buffer->waitqueue));
 
-                printk(KERN_INFO "%s-%d: %ld byte are written\n", MODNAME, minor, len-ret);
+                printk(KERN_INFO "%s-%d: %ld byte are written\n", MODNAME, minor, len);
         } else {
                 packed_work_t *the_task;
 
@@ -224,18 +231,25 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
 
                 atomic_inc_thread_in_wait(session->priority, minor);
 
-                ret = p_wait_event_interruptible_timeout(buffer->waitqueue, byte_to_read(session->priority,minor) > 0, session->timeout*CONFIG_HZ, &(buffer->operation_synchronizer));
+                ret = wait_event_interruptible_exclusive_timeout(
+                        buffer->waitqueue, 
+                        lock_and_awake(
+                                byte_to_read(session->priority,minor) > 0,
+                                &(buffer->operation_synchronizer)
+                                ),
+                        session->timeout*CONFIG_HZ
+                );
 
                 atomic_dec_thread_in_wait(session->priority, minor);
 
                 // check if timeout elapsed
-                if (ret == 0)
+                if (ret == 0) 
                         return -EAGAIN;
                 if (ret == -ERESTARTSYS)
                         return -EINTR;
         } else if (byte_to_read(session->priority,minor) == 0) {
                 mutex_unlock(&(buffer->operation_synchronizer));
-                return -EAGAIN;
+                return 0;
         }
  
         if(len > byte_to_read(session->priority,minor))

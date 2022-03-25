@@ -9,7 +9,7 @@
 /* CONSTANTS DEFINITION */
 
 /* general information */
-#define MAX_BYTE_IN_BUFFER 32*4096      // 32 pagine
+#define MAX_BYTE_IN_BUFFER 10//32*4096      // 32 pagine
 #define MINOR_NUMBER 128
 #define FLOWS 2
 
@@ -31,18 +31,18 @@
 
 /* definition of dynamic buffer segment */
 typedef struct data_segment {
-        char *content;              // content of segment
-        int byte_read;              // byte number read
+        struct list_head list;
+        char *content;                  // content of segment
+        int byte_read;                  // byte number read
         int size;
-        struct data_segment* next;
 } data_segment_t;
 
 /* definition of dynamic buffer */
 typedef struct dynamic_buffer {
-        data_segment_t* head;     // head pointer to read
-        data_segment_t* tail;     // tail pointer to attach new written block
+        struct list_head head;     // head pointer to read
         struct mutex operation_synchronizer;
         wait_queue_head_t waitqueue;
+        struct list_head head_process;
 } dynamic_buffer_t;
 
 /* struct to abstract IO object */
@@ -66,15 +66,21 @@ typedef struct packed_work{
         struct work_struct the_work;
 } packed_work_t;
 
+/* element for struct task_struct list */
+typedef struct task_struct_element {
+        struct task_struct *p;
+        struct list_head list;
+} task_struct_element_t;
+
 /* FUNCTIONS PROTOTYPE */
 
 /* dynamic buffer functions prototype */
-int             init_dynamic_buffer(dynamic_buffer_t *);
-int             init_data_segment(data_segment_t *, char *, int);
-unsigned long   write_dynamic_buffer(dynamic_buffer_t *, data_segment_t *);
-void            read_dynamic_buffer(dynamic_buffer_t *, char *, int);
-void            free_segment_buffer(data_segment_t *);
-void            free_dynamic_buffer(dynamic_buffer_t *);
+int     init_dynamic_buffer(dynamic_buffer_t *);
+int     init_data_segment(data_segment_t *, char *, int);
+void    write_dynamic_buffer(dynamic_buffer_t *, data_segment_t *);
+void    read_dynamic_buffer(dynamic_buffer_t *, char *, int);
+void    free_segment_buffer(data_segment_t *);
+void    free_dynamic_buffer(dynamic_buffer_t *);
 
 /* MACRO DEFINITION */
 #define get_seconds(sec)        (sec > MAX_SECONDS ? sec = MAX_SECONDS : (sec == 0 ? sec = MIN_SECONDS : sec))
@@ -110,14 +116,6 @@ void            free_dynamic_buffer(dynamic_buffer_t *);
 #define is_blocking(flags)                                                      \
         (flags == GFP_ATOMIC ? 0 : 1)
 
-#define mutex_try_or_lock(mutex,flags)                                          \
-        if (is_blocking(flags))                                                 \
-                mutex_lock(mutex);                                              \
-        else {                                                                  \
-                if (!mutex_trylock(mutex))                                      \
-                        return -EAGAIN;                                         \
-        }
-
 #define add_byte_in_buffer(priority,minor,len)                                  \
         byte_in_buffer[get_byte_in_buffer_index(priority,minor)] += len
 
@@ -140,38 +138,40 @@ void            free_dynamic_buffer(dynamic_buffer_t *);
                 thread_in_wait + get_byte_in_buffer_index(priority,minor),      \
                 1)
 
-/* redefinition of wait_event_interruptible_timeout for awake only one thread */
-#define __p_wait_event_interruptible_timeout(wq, condition, ret, mutex)	        \
-do {									        \
-	DEFINE_WAIT(__wait);						        \
-									        \
-	for (;;) {							        \
-		prepare_to_wait(&wq, &__wait, TASK_INTERRUPTIBLE);	        \
-                if (mutex_trylock(mutex)) {                                     \
-		        if (condition)                                          \
-                                break;                                          \
-                        else                                                    \
-                                mutex_unlock(mutex);                            \
-                }                  					        \
-									        \
-		if (!signal_pending(current)) {				        \
-			ret = schedule_timeout(ret);			        \
-			if (!ret)					        \
-				break;					        \
-			continue;					        \
-		}							        \
-		ret = -ERESTARTSYS;					        \
-		break;							        \
-	}								        \
-	finish_wait(&wq, &__wait);					        \
-} while (0)
+#define mutex_try_or_lock(mutex,flags)                                          \
+        if (is_blocking(flags))                                                 \
+                mutex_lock(mutex);                                              \
+        else {                                                                  \
+                if (!mutex_trylock(mutex))                                      \
+                        return -EAGAIN;                                         \
+        }
 
-#define p_wait_event_interruptible_timeout(wq, condition, timeout, mutex)       \
-({									        \
-	long __ret = timeout;						        \
-	if (!(condition))						        \
-		__p_wait_event_interruptible_timeout(wq, condition, __ret, mutex);\
-	__ret;								        \
+#define lock_and_awake(condition, mutex)                                        \
+({                                                                              \
+        int __ret = 0;                                                          \
+        if (mutex_trylock(mutex)) {                                             \
+                if (condition)                                                  \
+                        __ret = 1;                                              \
+                else                                                            \
+                        mutex_unlock(mutex);                                    \
+        }                                                                       \
+        __ret;                                                                  \
+})
+
+#define __wait_event_interruptible_exclusive_timeout(wq_head,condition,timeout) \
+	___wait_event(wq_head, ___wait_cond_timeout(condition),			\
+		      TASK_INTERRUPTIBLE, 1, timeout,				\
+		      __ret = schedule_timeout(__ret))
+
+
+#define wait_event_interruptible_exclusive_timeout(wq_head,condition,timeout)   \
+({										\
+	long __ret = timeout;							\
+	might_sleep();								\
+	if (!___wait_cond_timeout(condition))					\
+		__ret = __wait_event_interruptible_exclusive_timeout(wq_head,	\
+						condition, timeout);		\
+	__ret;									\
 })
 
 #endif
