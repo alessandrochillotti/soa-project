@@ -1,5 +1,6 @@
 /*  
- *  multi-flow device driver with 128 minor numbers
+ * @file multi-flow-dev.c
+ * @brief multi-flow device driver with 128 minor numbers
  */
 
 #define EXPORT_SYMTAB
@@ -14,25 +15,51 @@
 #include <linux/tty.h>
 #include <linux/workqueue.h>
 #include <linux/version.h>
-
 #include "lib/defines.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Alessandro Chillotti");
 
-static int Major;
-object_t devices[MINOR_NUMBER];
-
+/* module parameters */
 bool enabled[MINOR_NUMBER] = {[0 ... (MINOR_NUMBER-1)] = true}; 
-long byte_in_buffer[FLOWS * MINOR_NUMBER]; // first 128 -> low_priority, second 128 -> high_priority
+long byte_in_buffer[FLOWS * MINOR_NUMBER];
 long thread_in_wait[FLOWS * MINOR_NUMBER];
-long booked_byte[MINOR_NUMBER+1] = {[0 ... (MINOR_NUMBER)] = 0}; // booked_byte[MINOR_NUMBER] is always 0
-
 module_param_array(enabled, bool, NULL, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param_array(byte_in_buffer, long, NULL, S_IRUSR | S_IRGRP);
 module_param_array(thread_in_wait, long, NULL, S_IRUSR | S_IRGRP);
 
-/* the actual driver */
+/* global variables */
+static int Major;
+object_t devices[MINOR_NUMBER];
+long booked_byte[MINOR_NUMBER+1] = {[0 ... (MINOR_NUMBER)] = 0};        // booked_byte[MINOR_NUMBER] is always 0
+
+/* functions prototypes */
+static int      dev_open(struct inode *, struct file *);
+static int      dev_release(struct inode *, struct file *);
+void            deferred_write(struct work_struct *);
+static ssize_t  dev_write(struct file *, const char *, size_t, loff_t *);
+static ssize_t  dev_read(struct file *, char *, size_t, loff_t *);
+static ssize_t  dev_ioctl(struct file *, unsigned int, unsigned long);
+int             init_module(void);
+void            cleanup_module(void);
+
+/* driver operations setting */
+static struct file_operations fops = {
+        .owner = THIS_MODULE,
+        .write = dev_write,
+        .read = dev_read,
+        .open =  dev_open,
+        .release = dev_release,
+        .unlocked_ioctl = dev_ioctl
+};
+
+/**
+ * dev_open - manage session opening for a certain minor
+ * @inode:      I/O metadata of the device file
+ * @file:       I/O session to the device file
+ * 
+ * Returns 0 if the operation is successful, otherwise a negative value.
+ */
 static int dev_open(struct inode *inode, struct file *file)
 {
         int minor;
@@ -63,6 +90,13 @@ static int dev_open(struct inode *inode, struct file *file)
         return 0;
 }
 
+/**
+ * dev_release - close session opening for a certain minor
+ * @inode:      I/O metadata of the device file
+ * @file:       I/O session to the device file
+ * 
+ * Returns 0.
+ */
 static int dev_release(struct inode *inode, struct file *file)
 {
         kfree(file->private_data);
@@ -73,13 +107,18 @@ static int dev_release(struct inode *inode, struct file *file)
         return 0;
 }
 
-void deferred_write(unsigned long data)
+/**
+ * deferred_write - deferred write for low priority flow
+ * @data:      work pointer to run write
+ * 
+ */
+void deferred_write(struct work_struct *data)
 {
         packed_work_t *work = container_of((void*)data,packed_work_t,the_work);
         object_t *object = devices + work->minor;
         dynamic_buffer_t *buffer = object->buffer[LOW_PRIORITY];
 
-        mutex_lock(&(buffer->operation_synchronizer));
+        mutex_lock(&(buffer->op_mutex));
 
         write_dynamic_buffer(object->buffer[LOW_PRIORITY], work->staging_area);
 
@@ -88,7 +127,7 @@ void deferred_write(unsigned long data)
         sub_booked_byte(work->minor,work->staging_area->size);
         add_byte_in_buffer(LOW_PRIORITY,work->minor,work->staging_area->size);
 
-        mutex_unlock(&(buffer->operation_synchronizer));
+        mutex_unlock(&(buffer->op_mutex));
 
         kfree(container_of((void*)data,packed_work_t,the_work));
 
@@ -97,6 +136,16 @@ void deferred_write(unsigned long data)
         module_put(THIS_MODULE);
 }
 
+/**
+ * dev_write - write operation of driver
+ * @filp:       I/O session to the device file
+ * @buff:       buffer that contain data to write
+ * @len:        size of content to write
+ * 
+ * Returns:
+ *  written bytes number when the operation is successful
+ *  a negative value when error occurs
+ */
 static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t *off)
 {
         int ret;
@@ -127,11 +176,11 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                 return -ENOMEM;
         }
 
-        mutex_try_or_lock(&(buffer->operation_synchronizer),session->flags);
+        mutex_try_or_lock(&(buffer->op_mutex),session->flags);
 
         // check if thread must block
         if(!is_there_space(session->priority,minor) && is_blocking(session->flags)) {
-                mutex_unlock(&(buffer->operation_synchronizer));
+                mutex_unlock(&(buffer->op_mutex));
 
                 atomic_inc_thread_in_wait(session->priority, minor);
 
@@ -139,7 +188,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                         buffer->waitqueue, 
                         lock_and_awake(
                                 is_there_space(session->priority,minor),
-                                &(buffer->operation_synchronizer)
+                                &(buffer->op_mutex)
                                 ),
                         session->timeout*CONFIG_HZ
                 );
@@ -148,11 +197,11 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
                 // check if timeout elapsed
                 if (ret == 0)
-                        return -EAGAIN;
+                        return 0;
                 if (ret == -ERESTARTSYS)
                         return -EINTR;
         } else if (!is_there_space(session->priority,minor)) {
-                mutex_unlock(&(buffer->operation_synchronizer));
+                mutex_unlock(&(buffer->op_mutex));
 
                 kfree(temp_buffer);
                 kfree(segment_to_write);
@@ -181,8 +230,8 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
                 the_task =  kmalloc(sizeof(packed_work_t),session->flags);
                 if (the_task == NULL) {
-                        free_segment_buffer(segment_to_write);
-                        mutex_unlock(&(buffer->operation_synchronizer));
+                        free_data_segment(segment_to_write);
+                        mutex_unlock(&(buffer->op_mutex));
 
                         printk(KERN_ERR "%s-%d: work queue buffer allocation failure\n",MODNAME,minor);
                         return -ENOMEM;
@@ -200,11 +249,21 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                 printk(KERN_INFO "%s-%d: '%s' queued", MODNAME, minor, segment_to_write->content);
         }
 
-        mutex_unlock(&(object->buffer[session->priority]->operation_synchronizer));
+        mutex_unlock(&(object->buffer[session->priority]->op_mutex));
 
         return len;
 }
 
+/**
+ * dev_read - read operation of driver
+ * @filp:       I/O session to the device file
+ * @buff:       buffer that contain read data
+ * @len:        bytes number to be read
+ * 
+ * Returns:
+ *  read bytes number when the operation is successful
+ *  a negative value when error occurs
+ */
 static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
 {
         int ret;
@@ -224,10 +283,10 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
         if (len == 0)
                 return 0;
 
-        mutex_try_or_lock(&(buffer->operation_synchronizer),session->flags);
+        mutex_try_or_lock(&(buffer->op_mutex),session->flags);
 
         if(byte_to_read(session->priority,minor) == 0 && is_blocking(session->flags)) {
-                mutex_unlock(&(buffer->operation_synchronizer));
+                mutex_unlock(&(buffer->op_mutex));
 
                 atomic_inc_thread_in_wait(session->priority, minor);
 
@@ -235,7 +294,7 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
                         buffer->waitqueue, 
                         lock_and_awake(
                                 byte_to_read(session->priority,minor) > 0,
-                                &(buffer->operation_synchronizer)
+                                &(buffer->op_mutex)
                                 ),
                         session->timeout*CONFIG_HZ
                 );
@@ -244,11 +303,11 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
 
                 // check if timeout elapsed
                 if (ret == 0) 
-                        return -EAGAIN;
+                        return 0;
                 if (ret == -ERESTARTSYS)
                         return -EINTR;
         } else if (byte_to_read(session->priority,minor) == 0) {
-                mutex_unlock(&(buffer->operation_synchronizer));
+                mutex_unlock(&(buffer->op_mutex));
                 return 0;
         }
  
@@ -265,7 +324,7 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
 
         wake_up_interruptible(&(buffer->waitqueue));
 
-        mutex_unlock(&(buffer->operation_synchronizer));
+        mutex_unlock(&(buffer->op_mutex));
 
         ret = copy_to_user(buff,temp_buffer,len);
 
@@ -274,6 +333,14 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
         return len - ret;
 }
 
+/**
+ * dev_ioctl - manager of I/O control requests 
+ * @filp:       I/O session to the device file
+ * @command:    requested ioctl command
+ * @param:      optional parameter
+ * 
+ * Returns 0 if the operation is successful, otherwise a negative value.
+ */
 static ssize_t dev_ioctl(struct file *filp, unsigned int command, unsigned long param)
 {
         session_t *session = (session_t *)filp->private_data;
@@ -296,21 +363,17 @@ static ssize_t dev_ioctl(struct file *filp, unsigned int command, unsigned long 
                 session->timeout = get_seconds(param);
                 break;
         default:
-                return 0;
+                return -ENOTTY;
         }
 
         return 0;
 }
 
-static struct file_operations fops = {
-        .owner = THIS_MODULE,
-        .write = dev_write,
-        .read = dev_read,
-        .open =  dev_open,
-        .release = dev_release,
-        .unlocked_ioctl = dev_ioctl
-};
-
+/**
+ * init_module - module initialization 
+ * 
+ * Returns 0 if the operation is successful, otherwise a negative value.
+ */
 int init_module(void)
 {
         int i;
@@ -350,6 +413,10 @@ int init_module(void)
         return 0;
 }
 
+/**
+ * cleanup_module - module cleanup 
+ * 
+ */
 void cleanup_module(void)
 {
         int i;

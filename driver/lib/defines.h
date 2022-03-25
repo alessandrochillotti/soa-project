@@ -9,77 +9,92 @@
 /* CONSTANTS DEFINITION */
 
 /* general information */
-#define MAX_BYTE_IN_BUFFER 10//32*4096      // 32 pagine
-#define MINOR_NUMBER 128
-#define FLOWS 2
+#define MAX_BYTE_IN_BUFFER 32*4096                      // maximum number of byte in buffer
+#define MINOR_NUMBER 128                                // maximum number of minor manageable
+#define FLOWS 2                                         // number of different priority
 
-#define LOW_PRIORITY 0
-#define HIGH_PRIORITY 1
+#define LOW_PRIORITY 0                                  // index assigned to low priority
+#define HIGH_PRIORITY 1                                 // index assigned to high priority
 
 /* ioctl indexes */
-#define TO_HIGH_PRIORITY        3
+#define TO_HIGH_PRIORITY        3                       
 #define TO_LOW_PRIORITY         4
 #define BLOCK                   5
 #define UNBLOCK                 6
 #define TIMEOUT                 7
 
 /* upper and lower bound for seconds */
-#define MIN_SECONDS             1
-#define MAX_SECONDS             17179869        // 2^(32) = 4294967296 -> 4294967296/250 > 17179869.184 (no overflow)
+#define MIN_SECONDS             1                       // minimum amount of seconds
+#define MAX_SECONDS             17179869                // maximum amount of seconds
 
 /* STRUCTURES DEFINITION */
 
-/* definition of dynamic buffer segment */
+/*
+ * data_segment_t - data segment
+ * @list:       list_head element to link to list
+ * @content:    byte content of data segment
+ * @byte_read:  number of byte read up to instant t
+ * @size:       size of data segment content
+ */
 typedef struct data_segment {
         struct list_head list;
-        char *content;                  // content of segment
-        int byte_read;                  // byte number read
+        char *content;
+        int byte_read;
         int size;
 } data_segment_t;
 
-/* definition of dynamic buffer */
+/*
+ * dynamic_buffer_t - buffer
+ * @head:       head of linked list
+ * @op_mutex:   mutex to synchronize operation in buffer
+ * @waitqueue:  waitqueue
+ */
 typedef struct dynamic_buffer {
-        struct list_head head;     // head pointer to read
-        struct mutex operation_synchronizer;
+        struct list_head head;
+        struct mutex op_mutex;
         wait_queue_head_t waitqueue;
-        struct list_head head_process;
 } dynamic_buffer_t;
 
-/* struct to abstract IO object */
+/*
+ * object_t - I/O object
+ * @workqueue:  pointer to workqueue for low priority flow
+ * @buffer:     two buffer, low and high priority
+ */
 typedef struct object {
-        struct workqueue_struct *workqueue;     // the workqueue is in object_t because is only for low priority
+        struct workqueue_struct *workqueue;
         dynamic_buffer_t *buffer[FLOWS];
 } object_t;
 
-/* session struct */
+/*
+ * session_t - I/O session
+ * @priority:   priority of session
+ * @flags:      flags used for allocation (blocking or not)
+ * @timeout:    timeout for blocking operations
+ */
 typedef struct session {
-        int priority;
-        // bool blocking;
+        short priority;
         gfp_t flags;
         unsigned long timeout;
 } session_t;
 
-/* delayed work */
+/*
+ * packed_work_t - delayed work
+ * @staging_area:       byte to write
+ * @minor:              minor of device
+ * @the_work:           work struct
+ */
 typedef struct packed_work{
         data_segment_t *staging_area;
         int minor;
         struct work_struct the_work;
 } packed_work_t;
 
-/* element for struct task_struct list */
-typedef struct task_struct_element {
-        struct task_struct *p;
-        struct list_head list;
-} task_struct_element_t;
-
-/* FUNCTIONS PROTOTYPE */
-
-/* dynamic buffer functions prototype */
-int     init_dynamic_buffer(dynamic_buffer_t *);
-int     init_data_segment(data_segment_t *, char *, int);
+/* dynamic buffer functions prototypes */
+void    init_dynamic_buffer(dynamic_buffer_t *);
+void    init_data_segment(data_segment_t *, char *, int);
 void    write_dynamic_buffer(dynamic_buffer_t *, data_segment_t *);
 void    read_dynamic_buffer(dynamic_buffer_t *, char *, int);
-void    free_segment_buffer(data_segment_t *);
+void    free_data_segment(data_segment_t *);
 void    free_dynamic_buffer(dynamic_buffer_t *);
 
 /* MACRO DEFINITION */
@@ -138,6 +153,16 @@ void    free_dynamic_buffer(dynamic_buffer_t *);
                 thread_in_wait + get_byte_in_buffer_index(priority,minor),      \
                 1)
 
+
+/*
+ * mutex_try_or_lock
+ *
+ * This macro make a lock or try lock based on if the operations are
+ * blocking or not.
+ * 
+ * @mutex:      pointer to mutex to try lock
+ * @flags:      flag to understand if blocking or not operations
+ */
 #define mutex_try_or_lock(mutex,flags)                                          \
         if (is_blocking(flags))                                                 \
                 mutex_lock(mutex);                                              \
@@ -146,6 +171,15 @@ void    free_dynamic_buffer(dynamic_buffer_t *);
                         return -EAGAIN;                                         \
         }
 
+/*
+ * lock_and_awake
+ *
+ * This macro return a value of condition evaluated in the macro
+ * wait_event_interruptible_exclusive_timeout.
+ * 
+ * @condition:  condition to evaluate
+ * @mutex:      pointer to mutex to try lock
+ */
 #define lock_and_awake(condition, mutex)                                        \
 ({                                                                              \
         int __ret = 0;                                                          \
@@ -158,12 +192,33 @@ void    free_dynamic_buffer(dynamic_buffer_t *);
         __ret;                                                                  \
 })
 
+/*
+ * __wait_event_interruptible_exclusive_timeout
+ *
+ * This macro allow to put in waitqueue a task in exclusive mode and
+ * set a timeout.
+ * 
+ * @wq_head:    head of waitqueue
+ * @condition:  awakeness condition
+ * @timeout:    awakeness timeout
+ */
 #define __wait_event_interruptible_exclusive_timeout(wq_head,condition,timeout) \
 	___wait_event(wq_head, ___wait_cond_timeout(condition),			\
 		      TASK_INTERRUPTIBLE, 1, timeout,				\
 		      __ret = schedule_timeout(__ret))
 
 
+/*
+ * wait_event_interruptible_exclusive_timeout
+ *
+ * This macro is a change of wait_event_interruptible_timeout because
+ * call __wait_event_interruptible_exclusive_timeout instead of the
+ * macro __wait_event_interruptible_timeout.
+ * 
+ * @wq_head:    head of waitqueue
+ * @condition:  awakeness condition
+ * @timeout:    awakeness timeout
+ */
 #define wait_event_interruptible_exclusive_timeout(wq_head,condition,timeout)   \
 ({										\
 	long __ret = timeout;							\

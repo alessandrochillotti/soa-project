@@ -1,3 +1,8 @@
+/*  
+ * @file dynamic-buffer.c
+ * @brief support for writing/reading for multi-flow device driver with 128 minor numbers
+ */
+
 #include <stddef.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -9,42 +14,54 @@
 #include <linux/slab.h>
 #include <linux/tty.h>
 #include <linux/version.h>
-
 #include "lib/defines.h"
 
-/* functions */
-int init_dynamic_buffer(dynamic_buffer_t *buffer)
+/**
+ * init_dynamic_buffer - initialization of buffer
+ * @buffer:     pointer to buffer to initialize
+ */
+void init_dynamic_buffer(dynamic_buffer_t *buffer)
 {
         struct list_head *head;
 
         head = &(buffer->head);
 
-        mutex_init(&(buffer->operation_synchronizer));
+        mutex_init(&(buffer->op_mutex));
 
         init_waitqueue_head(&(buffer->waitqueue));
 
         INIT_LIST_HEAD(head);
-        
-        head = &(buffer->head_process);
-        INIT_LIST_HEAD(head);
-
-        return 0;
 }
 
-int init_data_segment(data_segment_t *element, char *content, int len)
+/**
+ * init_data_segment - initialization of data segment
+ * @element:    pointer to data segment to initialize
+ * @content:    content of data segment
+ * @len:        size of data segment content
+ */
+void init_data_segment(data_segment_t *element, char *content, int len)
 {
         element->content = content;
         element->size = len;
         element->byte_read = 0;
-
-        return 0;
 }
 
-void write_dynamic_buffer(dynamic_buffer_t *buffer, data_segment_t *segment_to_write)
+/**
+ * write_dynamic_buffer - put in list a new data segment
+ * @buffer:     pointer to buffer in edit
+ * @segment:    pointer to data segment to add
+ */
+void write_dynamic_buffer(dynamic_buffer_t *buffer, data_segment_t *segment)
 {
-        list_add_tail(&(segment_to_write->list),&(buffer->head));
+        list_add_tail(&(segment->list),&(buffer->head));
 }
 
+/**
+ * read_dynamic_buffer - read data in buffer
+ * @buffer:             pointer to buffer to read
+ * @read_content:       buffer that containt read data
+ * @len:                bytes number to be read
+ */
 void read_dynamic_buffer(dynamic_buffer_t *buffer, char *read_content, int len)
 {
         struct list_head *cur;
@@ -64,7 +81,7 @@ void read_dynamic_buffer(dynamic_buffer_t *buffer, char *read_content, int len)
 
                 old = cur;
                 cur = cur->next;
-                free_segment_buffer(cur_seg);
+                free_data_segment(cur_seg);
                 list_del(old);
                 
                 if (cur == head)
@@ -83,7 +100,11 @@ void read_dynamic_buffer(dynamic_buffer_t *buffer, char *read_content, int len)
         }
 }
 
-void free_segment_buffer(data_segment_t *segment)
+/**
+ * free_data_segment - free a data segment
+ * @segment:    pointer to data segment to free
+ */
+void free_data_segment(data_segment_t *segment)
 {
         kfree(segment->content);
         kfree(segment);
@@ -91,6 +112,10 @@ void free_segment_buffer(data_segment_t *segment)
         return;
 }
 
+/**
+ * free_dynamic_buffer - free a buffer
+ * @buffer:     pointer to buffer to free
+ */
 void free_dynamic_buffer(dynamic_buffer_t *buffer)
 { 
         struct list_head *cur;
@@ -102,11 +127,11 @@ void free_dynamic_buffer(dynamic_buffer_t *buffer)
         list_for_each(cur, head) {
                 cur_seg = list_entry(cur, data_segment_t, list);
 
-                free_segment_buffer(cur_seg);
+                free_data_segment(cur_seg);
                 list_del(cur);
         }
 
-        mutex_destroy(&(buffer->operation_synchronizer));
+        mutex_destroy(&(buffer->op_mutex));
 
         kfree(buffer);
 
