@@ -119,16 +119,20 @@ void free_data_segment(data_segment_t *segment)
 void free_dynamic_buffer(dynamic_buffer_t *buffer)
 { 
         struct list_head *cur;
+        struct list_head *old;
         struct list_head *head;
         data_segment_t *cur_seg;
 
         head = &(buffer->head);
+        old = NULL;
 
         list_for_each(cur, head) {
+                if (old)
+                        list_del(old);
                 cur_seg = list_entry(cur, data_segment_t, list);
 
                 free_data_segment(cur_seg);
-                list_del(cur);
+                old = cur;
         }
 
         mutex_destroy(&(buffer->op_mutex));
