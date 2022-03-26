@@ -76,7 +76,7 @@ static int dev_open(struct inode *inode, struct file *file)
                 return -EINVAL;
         
         session = kmalloc(sizeof(session_t), GFP_KERNEL);
-        if (session == NULL)
+        if (unlikely(!session))
                 return -ENOMEM;
 
         session->priority = HIGH_PRIORITY;
@@ -166,22 +166,18 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
         // copy data to write in a temporary buffer
         temp_buffer = kmalloc(len, session->flags);
-        if (temp_buffer == NULL)
+        if (unlikely(!temp_buffer))
                 return -ENOMEM;
         byte_not_copied = copy_from_user(temp_buffer, buff, len);
 
         segment_to_write = kmalloc(sizeof(data_segment_t), session->flags);
-        if (segment_to_write == NULL) {
+        if (unlikely(!segment_to_write)) {
                 kfree(temp_buffer);
                 return -ENOMEM;
         }
 
-        mutex_try_or_lock(&(buffer->op_mutex),session->flags);
-
         // check if thread must block
-        if(!is_there_space(session->priority,minor) && is_blocking(session->flags)) {
-                mutex_unlock(&(buffer->op_mutex));
-
+        if(is_blocking(session->flags)) {
                 atomic_inc_thread_in_wait(session->priority, minor);
 
                 ret = wait_event_interruptible_exclusive_timeout(
@@ -195,17 +191,25 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
                 atomic_dec_thread_in_wait(session->priority, minor);
 
-                // check if timeout elapsed
+                // check result of wait
                 if (ret == 0)
                         return 0;
                 if (ret == -ERESTARTSYS)
                         return -EINTR;
-        } else if (!is_there_space(session->priority,minor)) {
-                mutex_unlock(&(buffer->op_mutex));
-
-                kfree(temp_buffer);
-                kfree(segment_to_write);
-                return 0;
+        } else {
+                if (!mutex_trylock(&(buffer->op_mutex))) {
+                        kfree(temp_buffer);
+                        kfree(segment_to_write);
+                        return -EBUSY;
+                }
+                
+                if (is_empty(session->priority,minor)) {
+                        kfree(temp_buffer);
+                        kfree(segment_to_write);
+                        mutex_unlock(&(buffer->op_mutex));
+                        wake_up_interruptible(&(buffer->waitqueue));
+                        return 0;
+                }
         }
 
         if (len-byte_not_copied > free_space(session->priority,minor)) 
@@ -229,9 +233,10 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                         return -ENODEV;
 
                 the_task =  kmalloc(sizeof(packed_work_t),session->flags);
-                if (the_task == NULL) {
+                if (unlikely(!the_task)) {
                         free_data_segment(segment_to_write);
                         mutex_unlock(&(buffer->op_mutex));
+                        wake_up_interruptible(&(buffer->waitqueue));
 
                         printk(KERN_ERR "%s-%d: work queue buffer allocation failure\n",MODNAME,minor);
                         return -ENOMEM;
@@ -283,11 +288,7 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
         if (len == 0)
                 return 0;
 
-        mutex_try_or_lock(&(buffer->op_mutex),session->flags);
-
-        if(byte_to_read(session->priority,minor) == 0 && is_blocking(session->flags)) {
-                mutex_unlock(&(buffer->op_mutex));
-
+        if(is_blocking(session->flags)) {
                 atomic_inc_thread_in_wait(session->priority, minor);
 
                 ret = wait_event_interruptible_exclusive_timeout(
@@ -301,21 +302,27 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
 
                 atomic_dec_thread_in_wait(session->priority, minor);
 
-                // check if timeout elapsed
+                // check result of wait
                 if (ret == 0) 
                         return 0;
                 if (ret == -ERESTARTSYS)
                         return -EINTR;
-        } else if (byte_to_read(session->priority,minor) == 0) {
-                mutex_unlock(&(buffer->op_mutex));
-                return 0;
+        } else {
+                if (!mutex_trylock(&(buffer->op_mutex)))
+                        return -EBUSY;
+                
+                if (is_empty(session->priority,minor)) {
+                        mutex_unlock(&(buffer->op_mutex));
+                        wake_up_interruptible(&(buffer->waitqueue));
+                        return 0;
+                }
         }
  
         if(len > byte_to_read(session->priority,minor))
                 len = byte_to_read(session->priority,minor);
 
         temp_buffer = kmalloc(len, session->flags);
-        if (temp_buffer == NULL)
+        if (unlikely(!temp_buffer))
                 return -ENOMEM;
 
         read_dynamic_buffer(buffer, temp_buffer, len);
@@ -392,7 +399,8 @@ int init_module(void)
                 devices[i].buffer[LOW_PRIORITY] = kmalloc(sizeof(dynamic_buffer_t), GFP_KERNEL);
                 devices[i].buffer[HIGH_PRIORITY] = kmalloc(sizeof(dynamic_buffer_t), GFP_KERNEL);
 
-                if (devices[i].buffer[LOW_PRIORITY] == NULL || devices[i].buffer[HIGH_PRIORITY] == NULL) break;
+                if (unlikely(!devices[i].buffer[LOW_PRIORITY] || !devices[i].buffer[HIGH_PRIORITY]))
+                        break;
 
                 init_dynamic_buffer(devices[i].buffer[LOW_PRIORITY]);
                 init_dynamic_buffer(devices[i].buffer[HIGH_PRIORITY]);

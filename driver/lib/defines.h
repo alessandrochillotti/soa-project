@@ -128,6 +128,9 @@ void    free_dynamic_buffer(dynamic_buffer_t *);
 #define is_there_space(priority,minor)                                          \
         (free_space(priority,minor) == 0 ? 0 : 1)                            
 
+#define is_empty(priority,minor)                                                \
+        (byte_to_read(priority,minor) == 0 ? 1 : 0)    
+
 #define is_blocking(flags)                                                      \
         (flags == GFP_ATOMIC ? 0 : 1)
 
@@ -152,24 +155,6 @@ void    free_dynamic_buffer(dynamic_buffer_t *);
         __sync_fetch_and_sub(                                                   \
                 thread_in_wait + get_byte_in_buffer_index(priority,minor),      \
                 1)
-
-
-/*
- * mutex_try_or_lock
- *
- * This macro make a lock or try lock based on if the operations are
- * blocking or not.
- * 
- * @mutex:      pointer to mutex to try lock
- * @flags:      flag to understand if blocking or not operations
- */
-#define mutex_try_or_lock(mutex,flags)                                          \
-        if (is_blocking(flags))                                                 \
-                mutex_lock(mutex);                                              \
-        else {                                                                  \
-                if (!mutex_trylock(mutex))                                      \
-                        return -EAGAIN;                                         \
-        }
 
 /*
  * lock_and_awake
