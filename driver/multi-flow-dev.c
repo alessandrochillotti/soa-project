@@ -31,7 +31,7 @@ module_param_array(thread_in_wait, long, NULL, S_IRUSR | S_IRGRP);
 /* global variables */
 static int Major;
 object_t devices[MINOR_NUMBER];
-long booked_byte[MINOR_NUMBER+1] = {[0 ... (MINOR_NUMBER)] = 0};        // booked_byte[MINOR_NUMBER] is always 0
+long booked_byte[MINOR_NUMBER+1] = {[0 ... (MINOR_NUMBER)] = 0};
 
 /* functions prototypes */
 static int      dev_open(struct inode *, struct file *);
@@ -156,6 +156,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         session_t *session;
         dynamic_buffer_t *buffer;
         data_segment_t *segment_to_write;
+        packed_work_t *the_task;
 
         minor = get_minor(filp);
         object = devices + minor;
@@ -170,10 +171,20 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                 return -ENOMEM;
         byte_not_copied = copy_from_user(temp_buffer, buff, len);
 
+        // prepare memory areas
         segment_to_write = kmalloc(sizeof(data_segment_t), session->flags);
         if (unlikely(!segment_to_write)) {
                 kfree(temp_buffer);
                 return -ENOMEM;
+        }
+
+        if (session->priority == LOW_PRIORITY) {
+                the_task =  kmalloc(sizeof(packed_work_t),session->flags);
+                if (unlikely(!the_task)) {
+                        kfree(temp_buffer);
+                        free_data_segment(segment_to_write);
+                        return -ENOMEM;
+                }
         }
 
         // check if thread must block
@@ -192,23 +203,21 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                 atomic_dec_thread_in_wait(session->priority, minor);
 
                 // check result of wait
-                if (ret == 0)
-                        return 0;
-                if (ret == -ERESTARTSYS)
-                        return -EINTR;
+                if (ret == 0) 
+                        goto free_area;
+                if (ret == -ERESTARTSYS) {
+                        ret = -EINTR;
+                        goto free_area;
+                }
         } else {
                 if (!mutex_trylock(&(buffer->op_mutex))) {
-                        kfree(temp_buffer);
-                        kfree(segment_to_write);
-                        return -EBUSY;
+                        ret = -EBUSY;
+                        goto free_area;
                 }
                 
                 if (is_empty(session->priority,minor)) {
-                        kfree(temp_buffer);
-                        kfree(segment_to_write);
-                        mutex_unlock(&(buffer->op_mutex));
-                        wake_up_interruptible(&(buffer->waitqueue));
-                        return 0;
+                        ret = 0;
+                        goto unlock_wake;
                 }
         }
 
@@ -227,20 +236,8 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 
                 printk(KERN_INFO "%s-%d: %ld byte are written\n", MODNAME, minor, len);
         } else {
-                packed_work_t *the_task;
-
                 if(!try_module_get(THIS_MODULE)) 
                         return -ENODEV;
-
-                the_task =  kmalloc(sizeof(packed_work_t),session->flags);
-                if (unlikely(!the_task)) {
-                        free_data_segment(segment_to_write);
-                        mutex_unlock(&(buffer->op_mutex));
-                        wake_up_interruptible(&(buffer->waitqueue));
-
-                        printk(KERN_ERR "%s-%d: work queue buffer allocation failure\n",MODNAME,minor);
-                        return -ENOMEM;
-                }
 
                 the_task->staging_area = segment_to_write;
                 the_task->minor = minor;
@@ -257,6 +254,14 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         mutex_unlock(&(object->buffer[session->priority]->op_mutex));
 
         return len;
+
+        // goto label for manage free and unlock
+unlock_wake:    mutex_unlock(&(buffer->op_mutex));
+                wake_up_interruptible(&(buffer->waitqueue));
+free_area:      kfree(temp_buffer);
+                kfree(segment_to_write);
+                kfree(the_task);
+                return ret;
 }
 
 /**
@@ -288,6 +293,10 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
         if (len == 0)
                 return 0;
 
+        temp_buffer = kmalloc(len, session->flags);
+        if (unlikely(!temp_buffer))
+                return -ENOMEM;
+
         if(is_blocking(session->flags)) {
                 atomic_inc_thread_in_wait(session->priority, minor);
 
@@ -303,27 +312,30 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
                 atomic_dec_thread_in_wait(session->priority, minor);
 
                 // check result of wait
-                if (ret == 0) 
+                if (ret == 0) {
+                        kfree(temp_buffer);
                         return 0;
-                if (ret == -ERESTARTSYS)
+                }
+                if (ret == -ERESTARTSYS) {
+                        kfree(temp_buffer);
                         return -EINTR;
+                }
         } else {
-                if (!mutex_trylock(&(buffer->op_mutex)))
+                if (!mutex_trylock(&(buffer->op_mutex))) {
+                        kfree(temp_buffer);
                         return -EBUSY;
-                
+                }
+                        
                 if (is_empty(session->priority,minor)) {
                         mutex_unlock(&(buffer->op_mutex));
                         wake_up_interruptible(&(buffer->waitqueue));
+                        kfree(temp_buffer);
                         return 0;
                 }
         }
  
         if(len > byte_to_read(session->priority,minor))
                 len = byte_to_read(session->priority,minor);
-
-        temp_buffer = kmalloc(len, session->flags);
-        if (unlikely(!temp_buffer))
-                return -ENOMEM;
 
         read_dynamic_buffer(buffer, temp_buffer, len);
 
