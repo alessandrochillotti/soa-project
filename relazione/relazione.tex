@@ -209,6 +209,8 @@ La scelta di creare un vettore di \texttt{256} elementi anziché \texttt{128} è
         ((priority * MINOR_NUMBER) + minor)
 \end{lstlisting}
 
+Inoltre, si può notare come in questo modo non venga effettuato nessun check, ma una semplice operazione matematica.
+
 Per lavorare con i parametri del modulo sono stati sviluppati degli script bash:
 \begin{itemize}
 \item lo script \texttt{enable\_set} consente di settare l'abilitazione del multi-flow device per un certo minor;
@@ -277,7 +279,7 @@ La macro \texttt{lock\_and\_awake} è la seguente:
 \end{lstlisting}
 Questa macro ritorna \texttt{0} se il thread non è riuscito a prendere il lock o, nel caso in cui ci fosse riuscito, non abbia soddisfatto la condizione. In questo caso la condizione riguarda il fatto che nel buffer ci sia spazio o sia interamente occupato.
 
-Da notare che viene chiamata la \texttt{wait\_event\_interruptible\_exclusive\_timeout} che non è definita nel kernel Linux, ma questo è stato fatto perché serviva una soluzione che potesse risolvere i seguenti problemi:
+Da notare che viene chiamata la \texttt{wait\_event\_interruptible\_exclusive\_timeout}\footnote{Le macro chiamate da essa, ovvero la \texttt{\_\_wait\_event} e la \texttt{\_\_wait\_cond\_timeout}, sono definite a parire dal kernel 3.13, infatti all'interno del codice è presente il check sulla versione e, se inferiore a 3.13, viene chiamata semplicemente la \texttt{wait\_event\_interruptible\_timeout}.} che non è definita nel kernel Linux, ma questo è stato fatto perché serviva una soluzione che potesse risolvere i seguenti problemi:
 \begin{itemize}
 \item Utilizzando \texttt{wait\_event\_interruptible\_timeout} internamente i thread si sarebbero svegliati tutti e poi avrebbero controllato la condizione, ma solamente uno riesce ad uscire dalla wait e quindi questo avrebbe provato uno spreco di cicli di CPU.
 \item Utilizzando \texttt{wait\_event\_interruptible\_exclusive} si sarebbe dovuto implementare un meccanismo separato di gestione del timeout andando ad aggiungere complessità al prodotto software.
@@ -323,16 +325,6 @@ In figura \ref{img:fig-wait} si può notare come ogni thread venga mandato a dor
 \item L'ultima fase si occupa solo del rilascio del lock acquisito e ritorna i byte scritti.
 \end{itemize}
 
-Una nota va spesa per descrivere l'array che tiene conto dei byte prenotati, ovvero \texttt{booked\_byte}. Si è preferito mantenere esterno alla struttura questo campo in quanto i campi relativi ai byte dell'array sono stati mantenuti anch'essi fuori. Per leggibilità del codice si è scelto di creare un array di long con \texttt{MINOR\_NUMBER\footnote{\texttt{MINOR\_NUMBER} è la macro con valore pari a \texttt{128}, ovvero il numero massimo gestibile.}+1} componenti, ove l'ultima entry ha sempre valore \texttt{0}. Questo ha consentito, in base alla priorità, di calcolare sempre con la stessa formula matematica lo spazio occupato nell'array. Infatti:
-\begin{equation*}
-\mathtt{busy\_space(minor) = byte\_in\_buffer +}
-\begin{cases}
-	\mathtt{booked\_byte[minor]},& \mathtt{se\ LOW\ PRIORITY} \\
-	\mathtt{booked\_byte[128]},& \mathtt{se\ HIGH\ PRIORITY}
-\end{cases}
-\end{equation*}
-ove \texttt{booked\_byte[128] = 0}.
-
 \subsubsection{Scrittura differita}
 È stata creata una funzione ad-hoc che si occupa della scrittura differita ed essa effettua le seguenti operazioni:
 \begin{enumerate}
@@ -370,5 +362,8 @@ La funzione che risponde alle richieste di gestione di un multi-flow device file
 \end{itemize}
 
 Inoltre, è stata definita una piccola libreria che permette di rendere trasaparente l'invio di richieste I/O control, ovvero senza dover conoscere i codici. La libreria consiste in delle macro che espandono in invocazione di \texttt{ioctl} con il relativo codice ed eventualmente con l'apposito argomento.
+
+\subsection{Ulteriore osservazione}
+All'interno del codice è stata utilizzato il costrutto \texttt{unlikely} nei check degli errori riguardanti l'allocazione di memoria. Se ci fosse stato a disposizione un operation profile sarebbe stato interessante andare ad usare \texttt{likely/unlikely} per favorire la predizione dei salti, ad esempio se si fosse saputo che il 90\% dei thread fosse \texttt{HIGH PRIORITY}, si sarebbe potuto mettere \texttt{likely} sul controllo \texttt{priority == HIGH PRIORITY} e \texttt{unlikely} sul duale.
 
 \end{document}
