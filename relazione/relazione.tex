@@ -189,21 +189,21 @@ La rappresentazione del buffer è definita dalla struttura \texttt{dynamic\_buff
 Quindi, l'idea è che il multi-flow device driver si appoggi su un ulteriore oggetto, il \texttt{dynamic buffer}, che ci occupa di scrivere e leggere segmenti dati.
 
 
-Si può notare come siamo presenti \texttt{256} waitqueue, ovvero una per ogni buffer. Questa scelta è stata fatta perché il lavoro svolto su un altro buffer è sicuramente indipendente dal lavoro fatto su un altro buffer. Inoltre, nella funzione di inizializzazione del modulo vengono create delle singlethread workqueue. In questo modo il deferred work viene processato lungo un unico kworker deamon ed esso riporta le operazioni di scrittura sul buffer di bassa priorità nel medesimo ordine con cui sono state schedulate, senza dover implementare meccanismi di ordinamento e sincronizzazione.
+Si può notare come siano presenti \texttt{256} waitqueue, ovvero una per ogni buffer. Questa scelta è stata fatta perché il lavoro svolto su un buffer è sicuramente indipendente dal lavoro compiuto su un altro. Inoltre, nella funzione di inizializzazione del modulo vengono create delle singlethread workqueue. In questo modo il deferred work viene processato lungo un unico kworker deamon ed esso riporta le operazioni di scrittura sul buffer di bassa priorità nel medesimo ordine con cui sono state schedulate, senza dover implementare meccanismi di ordinamento e sincronizzazione.
 
 \subsection{Parametri del modulo}
 Sono stati definiti dei parametri del modulo ed essi sono stati utilizzati all'interno del driver come variabili operative. In particolare sono stati definiti i seguenti parametri:
 \begin{itemize}
-\item \texttt{enabled}: un vettore di \texttt{128} elementi di tipo \texttt{bool}, ove ogni elemento \texttt{i} indica se il multi-flow device file relativo al minor number \texttt{i} è attivo o meno;
-\item \texttt{byte\_in\_buffer}: un vettore di \texttt{256} elementi di tipo \texttt{long}, ove ogni elemento riporta il numero di byte presente all'interno del buffer relativo ad uno specifico minor number, in particolare:
+\item \texttt{enabled}: un vettore di \texttt{128} elementi di tipo \texttt{bool}, ove ogni elemento \texttt{i} indica se il multi-flow device relativo al minor number \texttt{i} è attivo o meno;
+\item \texttt{byte\_in\_buffer}: un vettore di \texttt{256} elementi di tipo \texttt{long}, ove ogni elemento riporta il numero di byte presenti all'interno del buffer relativo ad uno specifico minor number, in particolare:
 \begin{itemize}
-\item i primi \texttt{128} elementi sono relativi al buffer di bassa priorità del multi-flow device file con minor number \texttt{i};
-\item i secondi \texttt{128} elementi sono relativi al buffer di alta priorità del multi-flow device file con minor number $(\mathtt{i-128})$.
+\item i primi \texttt{128} elementi sono relativi al buffer di bassa priorità del multi-flow device con minor number \texttt{i};
+\item i secondi \texttt{128} elementi sono relativi al buffer di alta priorità del multi-flow device con minor number $(\mathtt{i-128})$.
 \end{itemize}
-\item \texttt{thread\_in\_wait}: un vettore di \texttt{256} elementi di tipo \texttt{long}, ove ogni elemento riporta il numero di byte presente all'interno del buffer relativo ad uno specifico minor number, secondo la medesima regola di \texttt{byte\_in\_buffer}.
+\item \texttt{thread\_in\_wait}: un vettore di \texttt{256} elementi di tipo \texttt{long}, ove ogni elemento riporta il numero di byte presenti all'interno del buffer relativo ad uno specifico minor number, secondo la medesima regola di \texttt{byte\_in\_buffer}.
 \end{itemize}
 
-La scelta di creare un vettore di \texttt{256} elementi anziché \texttt{128} è stata fatta perché ha permesso la realizzazione di un codice migliore dal punto di vista della leggibilità. Questo perché, indipendemente dalla priorità, prima di andare ad effettuare una scrittura o una lettura si effettua un controllo sul contento del buffer (i.e. spazio libero in caso di scrittura, byte nel buffer in caso di scrittura). Infatti, nel caso in cui si fossero creati due vettori da \texttt{128} elementi si sarebbero dovuti differenziare i casi. A tal proposito è stata realizzata la seguente macro:
+La scelta di creare un vettore di \texttt{256} elementi anziché \texttt{128} è stata fatta perché ha permesso la realizzazione di un codice migliore dal punto di vista della leggibilità. Questo perché, indipendentemente dalla priorità, prima di andare ad effettuare una scrittura o una lettura si effettua un controllo sul contenuto del buffer (i.e. spazio libero in caso di scrittura, byte nel buffer in caso di lettura). Infatti, nel caso in cui si fossero creati due vettori da \texttt{128} elementi si sarebbero dovuti differenziare i casi. A tal proposito è stata realizzata la seguente macro:
 \begin{lstlisting}
 #define get_byte_in_buffer_index(priority, minor)	\
         ((priority * MINOR_NUMBER) + minor)
@@ -215,7 +215,7 @@ Per lavorare con i parametri del modulo sono stati sviluppati degli script bash:
 \begin{itemize}
 \item lo script \texttt{enable\_set} consente di settare l'abilitazione del multi-flow device per un certo minor;
 \item lo script \texttt{enable\_query} consente di sapere se il multi-flow device è abilitato o meno per un certo minor;
-\item lo script \texttt{byte\_query} consente di sapere, data la priorità ed il minor, il numero di byte presente nel buffer associato;
+\item lo script \texttt{byte\_query} consente di sapere, data la priorità ed il minor, il numero di byte presenti nel buffer associato;
 \item lo script \texttt{thread\_query} consente di sapere, data la priorità ed il minor, il numero di thread in attesa sul flusso associato.
 \end{itemize}
 \subsection{Operazioni sui multi-flow device file}
@@ -225,14 +225,14 @@ Nelle seguenti sottosezioni sono descritte le funzioni che compongono il driver.
 La funzione \texttt{dev\_open} consente l'apertura di una sessione per poter lavorare con un determinato multi-flow device file. In questa funzione vengono effettuate le seguenti operazioni:
 \begin{enumerate}
 \item Viene controllato che il \texttt{minor} inserito sia effettivamente minore o uguale rispetto al \texttt{minor} massimo gestibile dal driver.
-\item Viene controllato la componente del vettore \texttt{enabled}, ovvero si controlla che il \texttt{minor} verso il quale si vuole aprire una sessione abbia il multi-flow device controller effettivamente abilitato.
+\item Viene controllata la componente del vettore \texttt{enabled}, ovvero si controlla che il \texttt{minor} verso il quale si vuole aprire una sessione abbia il multi-flow device controller effettivamente abilitato.
 \item Nel caso in cui entrambi i controlli abbiano avuto esito positivo, si prepara la struttura ad-hoc \texttt{session\_t} settando di default i seguenti parametri:
 \begin{itemize}
 \item come priorità viene inserita \texttt{HIGH PRIORITY};
 \item viene settata come sessione bloccante, ovvero viene settato il campo \texttt{flags}\footnote{In caso di operazione non bloccante, si avrà settato questo campo come \texttt{GFP\_ATOMIC}.} a \texttt{GFP\_KERNEL};
 \item viene settato il timeout a \texttt{MAX\_SECONDS}.
 \end{itemize}
-\item viene collegata questa istanza \texttt{session\_t} alla componente \texttt{file->private\_data}.
+\item Viene collegata questa istanza \texttt{session\_t} alla componente \texttt{file->private\_data}.
 \end{enumerate}
 
 È importante precisare che la macro \texttt{MAX\_SECONDS} è stata settata al valore \texttt{17179869} perché, nel momento in cui si inserisce il valore da attendere all'interno della \texttt{wait\_event\_interruptible\_exclusive\_timeout}\footnote{Questa macro è stata sviluppata durante la stesura del progetto, più avanti verrà analizzata e motivata.}, bisogna inserire il numero di secondi moltiplicato per la costante \texttt{HZ}, ove in questo caso è pari a \texttt{250}. Il ragionamento effettuato è il seguente:
@@ -249,13 +249,13 @@ La funzione \texttt{dev\_write} consente la scrittura del contenuto di un buffer
 \begin{itemize}
 \item Una prima fase di allocazione di aree di memoria:
 \begin{enumerate}
-\item Viene allocato un buffer temporaneo di livello kernel e subito dopo viene effettuato la \texttt{copy\_from\_user}.
+\item Viene allocato un buffer temporaneo di livello kernel e subito dopo viene effettuata la \texttt{copy\_from\_user}.
 
 Questo viene fatto prima di prendere il lock perché, nel caso in cui l'utente avesse dato un'area di memoria non materializzata, si sarebbe dovuto attendere il gestore di page fault e avrebbe causato problemi di prestazioni.
 \item Viene allocata l'area di memoria per il \texttt{data\_segment} corrente, ovvero l'oggetto da inserire all'interno del \texttt{dynamic buffer}.
 \item Nel caso in cui la priorità sia bassa, viene allocata l'area di memoria per poter inserire deferred work.
 \end{enumerate}
-Come si può notare, questa fase viene effettuata prima di provare ad acquisire il lock in modo tale che non ci possano essere problemi di allocazione nel momento in cui il lock venga acquisito.
+Come si può notare, questa fase viene effettuata prima di provare ad acquisire il lock in modo tale che non ci possano essere problemi di allocazione nel momento in cui si possiede il lock.
 \item Una seconda fase in cui si cerca di acquisire il lock e ci sono due casi:
 \begin{itemize}
 \item Nel caso in cui le operazioni sono bloccanti:
@@ -281,7 +281,7 @@ Questa macro ritorna \texttt{0} se il thread non è riuscito a prendere il lock 
 
 Da notare che viene chiamata la \texttt{wait\_event\_interruptible\_exclusive\_timeout}\footnote{Le macro chiamate da essa, ovvero la \texttt{\_\_wait\_event} e la \texttt{\_\_wait\_cond\_timeout}, sono definite a parire dal kernel 3.13, infatti all'interno del codice è presente il check sulla versione e, se inferiore a 3.13, viene chiamata semplicemente la \texttt{wait\_event\_interruptible\_timeout}.} che non è definita nel kernel Linux, ma questo è stato fatto perché serviva una soluzione che potesse risolvere i seguenti problemi:
 \begin{itemize}
-\item Utilizzando \texttt{wait\_event\_interruptible\_timeout} internamente i thread si sarebbero svegliati tutti e poi avrebbero controllato la condizione, ma solamente uno riesce ad uscire dalla wait e quindi questo avrebbe provato uno spreco di cicli di CPU.
+\item Utilizzando \texttt{wait\_event\_interruptible\_timeout} internamente i thread si sarebbero svegliati tutti e poi avrebbero controllato la condizione, ma solamente uno sarebbe riuscito ad uscire dalla wait. Questo avrebbe comportato uno spreco di cicli di CPU.
 \item Utilizzando \texttt{wait\_event\_interruptible\_exclusive} si sarebbe dovuto implementare un meccanismo separato di gestione del timeout andando ad aggiungere complessità al prodotto software.
 \end{itemize}
 Si è pensato che in questo modo la complessità del prodotto software non sia stata alterata e che risulti anche abbastanza elegante per la risoluzione del primo problema. Infatti, è stata modificata la funzione \texttt{\_\_wait\_event\_interruptible\_timeout}, in particolare:
@@ -300,6 +300,7 @@ In relazione alla documentazione (\href{https://www.makelinux.net/ldd3/chp-6-sec
 In figura \ref{img:fig-wait} si può notare come ogni thread venga mandato a dormire con il flag \texttt{WQ\_FLAG\_EXCLUSIVE} impostato, ma inoltre rimane valido lo \texttt{schedule\_timeout}.
 \item Quando il thread riprende l'esecuzione decrementa la variabile precedentemente incrementata e, se si è svegliato perché \texttt{lock\_and\_awake} ha ritornato \texttt{1}, allora prosegue l'esecuzione nella terza fase.
 \end{enumerate}
+\newpage
 \item Nel caso in cui le operazioni non sono bloccanti:
 \begin{enumerate}
 \item Si prova a prendere il lock ed in caso negativo si rilasciano le aree allocate e si ritorna \texttt{EBUSY}.
@@ -316,7 +317,7 @@ In figura \ref{img:fig-wait} si può notare come ogni thread venga mandato a dor
 \item Nel caso di \texttt{LOW PRIORITY}:
 \begin{enumerate}
 \item Si chiama la \texttt{try\_module\_get}.
-\item Si collega solamente\footnote{Questo è un punto in favore in termini di performance perché all'interno della sezione critica si ha bisogno solamente di collegare il contenuto da scrivere alla struttura del deferred work.} il contenuto da scrivere al deferred work.
+\item Si collega solamente\footnote{Questo è un vantaggio in termini di performance perché all'interno della sezione critica si ha bisogno solamente di collegare il contenuto da scrivere alla struttura del deferred work.} il contenuto da scrivere al deferred work.
 \item Si chiama \texttt{\_\_INIT\_WORK}.
 \item Si incrementano i byte prenotati.
 \item Si accoda il lavoro nella workqueue.
@@ -336,10 +337,10 @@ In figura \ref{img:fig-wait} si può notare come ogni thread venga mandato a dor
 \end{enumerate}
 
 \subsection{Operazione di lettura}
-La funzione \texttt{dev\_read} consente la lettura del contenuto del buffer di kernel e spostare il contenuto letto all'interno del buffer di livello user. In questa funzione avvengono le seguenti operazioni:
+La funzione \texttt{dev\_read} consente la lettura del contenuto del buffer di livello kernel e lo spostamento del contenuto letto all'interno del buffer di livello user. In questa funzione avvengono le seguenti operazioni:
 \begin{enumerate}
 \item Il primo controllo effettuato riguarda il numero di byte che l'utente vuole leggere, infatti se il numero di byte è pari a \texttt{0} si ritorna immediatamente \texttt{0} in modo tale da non consumare inutilmente cicli di CPU.
-\item Viene allocata l'aria di memoria per un buffer temporaneo.
+\item Viene allocata l'area di memoria per un buffer temporaneo.
 \item Anche qui ci sono due strade:
 \begin{itemize}
 \item Nel caso bloccante, si segue lo stesso approccio della funzione \texttt{dev\_write}, ma la condizione con cui si va a dormire riguarda ovviamente la presenza di byte da leggere.
