@@ -94,8 +94,6 @@ int main(int argc, char** argv)
         printf("creating %d thread for device %s with major %d\n", threads, argv[1], major);
         
         device = strdup(argv[1]);
-        // sprintf(command, "mknod %s c %d 0\n", device, major);
-        // system(command);
 
         for (int i = 0; i < threads; i++) {
                 thread[i].path = device;

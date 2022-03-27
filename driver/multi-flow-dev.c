@@ -31,7 +31,7 @@ module_param_array(thread_in_wait, long, NULL, S_IRUSR | S_IRGRP);
 /* global variables */
 static int Major;
 object_t devices[MINOR_NUMBER];
-long booked_byte[MINOR_NUMBER+1] = {[0 ... (MINOR_NUMBER)] = 0};
+long booked_byte[MINOR_NUMBER] = {[0 ... (MINOR_NUMBER-1)] = 0};
 
 /* functions prototypes */
 static int      dev_open(struct inode *, struct file *);
@@ -85,8 +85,9 @@ static int dev_open(struct inode *inode, struct file *file)
 
         file->private_data = session;
 
+#ifdef DEBUG         
         printk(KERN_INFO "%s-%d: device file successfully opened for object\n", MODNAME, minor);
-        
+#endif
         return 0;
 }
 
@@ -102,8 +103,9 @@ static int dev_release(struct inode *inode, struct file *file)
         kfree(file->private_data);
         file->private_data = NULL;
 
+#ifdef DEBUG 
         printk("%s: device file with minor %d closed\n", MODNAME, get_minor(file));    
-
+#endif
         return 0;
 }
 
@@ -122,8 +124,9 @@ void deferred_write(struct work_struct *data)
 
         write_dynamic_buffer(object->buffer[LOW_PRIORITY], work->staging_area);
 
+#ifdef DEBUG 
         printk(KERN_INFO "%s-%d: deferred write of '%s' completed", MODNAME, work->minor, work->staging_area->content);
-
+#endif
         sub_booked_byte(work->minor,work->staging_area->size);
         add_byte_in_buffer(LOW_PRIORITY,work->minor,work->staging_area->size);
 
@@ -162,8 +165,11 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         object = devices + minor;
         session = (session_t *)filp->private_data;
         buffer = object->buffer[session->priority];
+        the_task = NULL;
 
+#ifdef DEBUG 
         printk(KERN_INFO "%s-%d: write called\n", MODNAME, minor);
+#endif
 
         // copy data to write in a temporary buffer
         temp_buffer = kmalloc(len, session->flags);
@@ -182,7 +188,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                 the_task =  kmalloc(sizeof(packed_work_t),session->flags);
                 if (unlikely(!the_task)) {
                         kfree(temp_buffer);
-                        free_data_segment(segment_to_write);
+                        kfree(segment_to_write);
                         return -ENOMEM;
                 }
         }
@@ -191,7 +197,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
         if(is_blocking(session->flags)) {
                 atomic_inc_thread_in_wait(session->priority, minor);
 
-                ret = wait_event_interruptible_exclusive_timeout(
+                ret = personal_wait(
                         buffer->waitqueue, 
                         lock_and_awake(
                                 is_there_space(session->priority,minor),
@@ -233,11 +239,14 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                 write_dynamic_buffer(buffer, segment_to_write);
                 add_byte_in_buffer(HIGH_PRIORITY,minor,len);
                 wake_up_interruptible(&(buffer->waitqueue));
-
+#ifdef DEBUG 
                 printk(KERN_INFO "%s-%d: %ld byte are written\n", MODNAME, minor, len);
+#endif
         } else {
-                if(!try_module_get(THIS_MODULE)) 
-                        return -ENODEV;
+                if(!try_module_get(THIS_MODULE)) {
+                        ret = -ENODEV;
+                        goto unlock_wake;
+                }
 
                 the_task->staging_area = segment_to_write;
                 the_task->minor = minor;
@@ -247,8 +256,9 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
                 add_booked_byte(minor,len);
 
                 queue_work(object->workqueue, &(the_task->the_work));
-
+#ifdef DEBUG 
                 printk(KERN_INFO "%s-%d: '%s' queued", MODNAME, minor, segment_to_write->content);
+#endif
         }
 
         mutex_unlock(&(object->buffer[session->priority]->op_mutex));
@@ -259,7 +269,7 @@ static ssize_t dev_write(struct file *filp, const char *buff, size_t len, loff_t
 unlock_wake:    mutex_unlock(&(buffer->op_mutex));
                 wake_up_interruptible(&(buffer->waitqueue));
 free_area:      kfree(temp_buffer);
-                kfree(segment_to_write);
+                free_data_segment(segment_to_write);
                 kfree(the_task);
                 return ret;
 }
@@ -287,9 +297,10 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
         object = devices + minor;
         session = (session_t *)filp->private_data;
         buffer = object->buffer[session->priority];
-        
-        printk(KERN_INFO "%s-%d: read called\n",MODNAME,minor);
 
+#ifdef DEBUG      
+        printk(KERN_INFO "%s-%d: read called\n",MODNAME,minor);
+#endif
         if (len == 0)
                 return 0;
 
@@ -300,7 +311,7 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
         if(is_blocking(session->flags)) {
                 atomic_inc_thread_in_wait(session->priority, minor);
 
-                ret = wait_event_interruptible_exclusive_timeout(
+                ret = personal_wait(
                         buffer->waitqueue, 
                         lock_and_awake(
                                 byte_to_read(session->priority,minor) > 0,
@@ -347,7 +358,9 @@ static ssize_t dev_read(struct file *filp, char *buff, size_t len, loff_t *off)
 
         ret = copy_to_user(buff,temp_buffer,len);
 
+#ifdef DEBUG 
         printk(KERN_INFO "%s-%d: %ld byte are read\n",MODNAME,minor,len-ret);
+#endif
 
         return len - ret;
 }

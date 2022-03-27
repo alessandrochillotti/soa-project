@@ -108,10 +108,13 @@ void    free_dynamic_buffer(dynamic_buffer_t *);
 #define get_minor(session)      MINOR(session->f_dentry->d_inode->i_rdev)
 #endif
 
-/* definition of macro to manage byte in buffer and indexes*/
-#define get_booked_byte_index(priority,minor)                                   \
-        (priority == HIGH_PRIORITY ? MINOR_NUMBER : minor)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0)
+#define personal_wait   wait_event_interruptible_exclusive_timeout      
+#else
+#define personal_wait   wait_event_interruptible_timeout
+#endif
 
+/* definition of macro to manage byte in buffer and indexes*/
 #define get_byte_in_buffer_index(priority, minor)                               \
         ((priority * MINOR_NUMBER) + minor)
 
@@ -119,8 +122,12 @@ void    free_dynamic_buffer(dynamic_buffer_t *);
         byte_in_buffer[get_byte_in_buffer_index(priority, minor)]
 
 #define busy_space(priority,minor)                                              \
-        (byte_in_buffer[get_byte_in_buffer_index(priority, minor)] +            \
-        booked_byte[get_booked_byte_index(priority,minor)])                                                                                            \
+        (priority == LOW_PRIORITY ?                                             \
+        (                                                                       \
+                byte_in_buffer[get_byte_in_buffer_index(priority, minor)] +     \
+                        booked_byte[minor]) :                                   \
+                byte_in_buffer[get_byte_in_buffer_index(priority, minor)]       \
+        )                                                             
 
 #define free_space(priority,minor)                                              \
         MAX_BYTE_IN_BUFFER - busy_space(priority,minor)         
